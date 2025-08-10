@@ -428,7 +428,7 @@ class FileManager:
     def create_csv_path() -> Tuple[str, List[str]]:
         """Cria caminho e cabeçalho do CSV."""
         today = datetime.now().strftime('%Y_%m_%d')
-        folder_path = os.path.join("data", today)
+        folder_path = os.path.join("../data", today)
         os.makedirs(folder_path, exist_ok=True)
         
         # Encontrar próxima versão
@@ -467,7 +467,7 @@ class FileManager:
     def create_video_path() -> str:
         """Cria caminho do vídeo."""
         today = datetime.now().strftime('%Y_%m_%d')
-        folder_path = os.path.join("videos", today)
+        folder_path = os.path.join("../data", today)
         os.makedirs(folder_path, exist_ok=True)
         
         version = 1
@@ -857,8 +857,8 @@ def main():
         print("="*70)
         
         # Caminhos dos ficheiros
-        video_path = "data/dataset28/video3.mp4"
-        csv_path = "data/dataset28/dados_teclas3.csv"
+        video_path = "../data/dataset28/video3.mp4"
+        csv_path = "../data/dataset28/dados_teclas3.csv"
         
         # Verificar ficheiros
         video_exists = os.path.exists(video_path)

@@ -1,7 +1,7 @@
 # LearningToInteract
 Final Repository of Dissertation
 
-fullbody_recording.py --> BASE Version learning_to_interact/2input/fullbody/fullbody_video_recording82_1.py
+0fullbody_record.py --> BASE Version learning_to_interact/2input/fullbody/fullbody_video_recording82_1.py
 
 BASE Version learning_to_interact/comunication/v7/keypoints_optimized6/keypoints_optimized6.pde
 
