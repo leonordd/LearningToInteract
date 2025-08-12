@@ -847,8 +847,8 @@ def main():
         
         # Caminhos dos ficheiros
         folder = "../data/dataset30"
-        video = "video2.mp4"
-        csv = "dados_teclas2.csv"
+        video = "video1.mp4"
+        csv = "dados_teclas1.csv"
 
         path_video = Path(__file__).resolve().parent / folder / video
         path_csv = Path(__file__).resolve().parent / folder / csv

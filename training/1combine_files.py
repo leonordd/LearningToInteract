@@ -7,7 +7,7 @@ MAX_TIMESTAMP_DIF = 200
 
 # Caminhos para os ficheiros CSV
 folder = "../data/dataset30"
-ficheiro_a = "dados_teclas2.csv" #ficheiro maior
+ficheiro_a = "dados_teclas1.csv" #ficheiro maior
 ficheiro_b = "v1.csv" #ficheiro menor
 resultado = "combinado30.csv"
 csv_path_a = Path(__file__).resolve().parent / folder / ficheiro_a #ficheiro maior

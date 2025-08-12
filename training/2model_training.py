@@ -29,6 +29,7 @@ import time
 import json
 from collections import defaultdict
 
+
 # ============================================================================
 # CLASSE PARA ESTATÍSTICAS COMPLETAS (MANTIDA IGUAL)
 # ============================================================================
@@ -404,7 +405,7 @@ print(X_coordinates_df.describe().round(3))
 """
 
 # Colunas a excluir (features de visibilidade + colunas não-feature)
-excluded_columns = ['MillisSinceEpoch','LocalMillisProcessing','AnimacaoAtual','ValorMapeado','Valor','VirtualTime','Face','Pose','RightHand','LeftHand','AnimacaoAtual.1'] 
+excluded_columns = ['MillisSinceEpoch','TempoVideo','AnimacaoAtual','ValorMapeado','Valor','FrameNumber','Face','Pose','RightHand','LeftHand'] 
 print("Excluded Columns", excluded_columns)
 
 # Selecionar apenas features de coordenadas
@@ -685,7 +686,7 @@ X_val, y_val = X_val.to(device), y_val.to(device)
 
 print("\n=== INÍCIO DO TREINO (APENAS COORDENADAS) ===")
 print(f"Features utilizadas: {input_num} (APENAS coordenadas)")
-print(f"Features de visibilidade EXCLUÍDAS: {existing_visibility_features}")
+#print(f"Features de visibilidade EXCLUÍDAS: {existing_visibility_features}")
 print(f"y_train range: {torch.min(y_train)} to {torch.max(y_train)}")
 print(f"y_test range: {torch.min(y_test)} to {torch.max(y_test)}")
 
@@ -865,7 +866,7 @@ model_info = {
         'feature_type': 'coordinates_only',
         'coordinate_features': coordinate_features,
         'feature_order': final_feature_names,
-        'excluded_visibility_features': existing_visibility_features
+        #'excluded_visibility_features': existing_visibility_features
     },
     'best_accuracy': best_test_acc,
     'best_weighted_accuracy': best_weighted_acc,
@@ -878,7 +879,7 @@ model_info = {
             #'scaler_type': 'StandardScaler'
         },
         'excluded_features': {
-            'visibility_features': existing_visibility_features,
+            #'visibility_features': existing_visibility_features,
             'reason': 'Excluded to avoid feature dominance and test coordinate-only performance'
         }
     },
@@ -909,9 +910,9 @@ print(f"\nModelo guardado em: {model_save_path}")
 print(f"\n=== ANÁLISE DA PERFORMANCE SEM FEATURES DE VISIBILIDADE ===")
 
 print(f"📊 COMPARAÇÃO DE COMPLEXIDADE:")
-print(f"  Features com visibilidade: {len(existing_visibility_features)} vis + {len(coordinate_features)} coord = {len(existing_visibility_features) + len(coordinate_features)} total")
+#print(f"  Features com visibilidade: {len(existing_visibility_features)} vis + {len(coordinate_features)} coord = {len(existing_visibility_features) + len(coordinate_features)} total")
 print(f"  Features apenas coordenadas: {len(coordinate_features)} coord")
-print(f"  Redução de features: {len(existing_visibility_features)} features ({len(existing_visibility_features)/(len(existing_visibility_features) + len(coordinate_features))*100:.1f}%)")
+#print(f"  Redução de features: {len(existing_visibility_features)} features ({len(existing_visibility_features)/(len(existing_visibility_features) + len(coordinate_features))*100:.1f}%)")
 
 print(f"\n🎯 PERFORMANCE ALCANÇADA (APENAS COORDENADAS):")
 print(f"  Accuracy: {test_metrics['accuracy']:.4f}")
@@ -952,12 +953,12 @@ print(f"🔄 Épocas treinadas: {training_dynamics['total_epochs']}")
 print(f"⏱️ Tempo total: {sum(stats.epoch_times):.1f}s")
 
 print(f"\n🔧 ESTRATÉGIA IMPLEMENTADA:")
-print(f"   Features de visibilidade EXCLUÍDAS: {existing_visibility_features}")
+#print(f"   Features de visibilidade EXCLUÍDAS: {existing_visibility_features}")
 print(f"   Features de coordenadas MANTIDAS: {len(coordinate_features)}")
 
 print(f"\n📊 ESTATÍSTICAS DE DADOS:")
-print(f"   - Total features originais: {len(existing_visibility_features) + len(coordinate_features)}")
-print(f"   - Features utilizadas: {len(coordinate_features)} ({len(coordinate_features)/(len(existing_visibility_features) + len(coordinate_features))*100:.1f}%)")
+#print(f"   - Total features originais: {len(existing_visibility_features) + len(coordinate_features)}")
+#print(f"   - Features utilizadas: {len(coordinate_features)} ({len(coordinate_features)/(len(existing_visibility_features) + len(coordinate_features))*100:.1f}%)")
 
 print(f"\n💾 Arquivos salvos:")
 print(f"   - Modelo: {model_save_path}")
