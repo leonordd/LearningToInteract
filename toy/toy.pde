@@ -69,7 +69,7 @@ float[][] allTransitions = {
   {0.0, 3.0, 6.0, 9.0, 11.0}           // Animação 2 → 6 keyframes (kfs[0] a kfs[5])
 };
 
-String [] animationNames = {"The natural symmetry", "Trascending", "Looking into the void", "Inception"};
+String [] animationNames = {"The natural symmetry", "Transcending", "Looking into the void", "Inception"};
 
 float minD = 0.05, minDe = 0.05;
 float maxD = 0.3, maxDe = 0.3;
@@ -101,7 +101,7 @@ void setup() {
   // Inicializar baseado no modo selecionado
   if (modeManager.isModoCaptura()) {
     initializeAllAnimations(n_circles);
-    captureManager.configurarVideoPersonalizado(5000, 300000); // 5000 frames, 5 minutos
+    //captureManager.configurarVideoPersonalizado(300000, 30.0); // 5 minutos (300000ms), 30 FPS
   } else if (modeManager.isModoJogo()) {
     network.beginConnection();
     initializeAllAnimations(n_circles);
