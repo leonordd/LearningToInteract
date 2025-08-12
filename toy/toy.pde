@@ -101,6 +101,7 @@ void setup() {
   // Inicializar baseado no modo selecionado
   if (modeManager.isModoCaptura()) {
     initializeAllAnimations(n_circles);
+    captureManager.inicializar();
     //captureManager.configurarVideoPersonalizado(300000, 30.0); // 5 minutos (300000ms), 30 FPS
   } else if (modeManager.isModoJogo()) {
     network.beginConnection();
@@ -111,7 +112,6 @@ void setup() {
     initializeAllAnimations(n_circles);
   }
 
-  captureManager.inicializar();
 }
 
 void draw() {
@@ -139,9 +139,7 @@ void draw() {
 
     captureManager.atualizarDados(currentAnimation, valor, t);
     updateDebugWindow_Captura(t, valor);
-    /*captureManager.salvarDadosCSV(currentAnimation, valor, t);
-     updateDebugWindow_Captura(t, valor);
-     captureManager.executarCaptura();*/
+
   } else if (modeManager.isModoJogo()) {
 
     if (!estavaNoModoJogo) {
@@ -198,16 +196,20 @@ void draw() {
       // Enviar informações para a janela de debug
       network.sendAnimationData(currentAnimation, td, isTransitioning, targetAnimation);
       updateDebugWindow_Jogo(networkData);
-      
+
       int valor = round(map(td, 0.0, 11.0, 0, 8));
-      captureManager.executarCapturaSincronizada(currentAnimation, valor, td);
+      captureManager.atualizarDados(currentAnimation, valor, td);
 
       //captureManager.executarCaptura(); //captura apenas o ecrã
     }
   } else if (modeManager.isModoJogoComTreino()) {
-    //recebe um ficheiro de python diferente
-    //recebe os dados de python (input do modelo)
     print("A");
+    
+    //iniciar script de python com path "1input_not_pred.py"
+    //iniciarScriptPythonTreino();
+    //receber valor da animação (ou seja as classes predicted 1,2,3,4)
+    //update currentAnimation para o valor da animação. Ou seja selecionar a animação consoante o (valor que vem da rede - 1)
+    
   } else {
     if (estavaNoModoJogo) {
       println("Saiu do modo jogo. A terminar script Python...");
