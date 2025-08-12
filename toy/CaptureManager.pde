@@ -9,10 +9,7 @@ class CaptureManager {
 
   // Configurações de captura - FIXAS PARA 5 MINUTOS
   private final int DURACAO_FIXA_MS = 300000; // 5 minutos em millisegundos
-  private final float VIDEO_FPS = 30.0; // FPS fixo para o vídeo final
-  
-  // NOVO: Modo de captura - captura TODOS os frames ou baseado em tempo
-  private boolean captureAllFrames = true; // true = captura todos os frames renderizados
+  private final float VIDEO_FPS = 24.0; // FPS do vídeo final
   
   // Configurações calculadas
   private int targetFrameCount;
@@ -21,18 +18,21 @@ class CaptureManager {
 
   // Timing
   private int tempoInicial;
-  private int startTime;
-  private long lastFrameTime = 0;
   private long millisSinceEpoch;
   
-  // NOVO: Tempo virtual para sincronização
-  private float virtualTimeMs = 0;
+  // Controle de sincronização REAL
   private float msPerFrame;
+  private float nextFrameTime = 0; // Quando capturar o próximo frame
+  private boolean frameReadyToCapture = false;
 
   // FFmpeg path
   private String ffmpegPath = "/opt/homebrew/bin/ffmpeg";
-
   private PApplet parent;
+
+  // Cache do último estado para sincronização
+  private int lastAnimacao = -1;
+  private float lastValorMapeado = -1;
+  private float lastT = -1;
 
   public CaptureManager(FileManager fileManager, PApplet parent) {
     this.fileManager = fileManager;
@@ -45,47 +45,39 @@ class CaptureManager {
     fileManager.configurarPastas();
     inicializarCSV();
     inicializarVideo();
-
-    // Não forçar framerate específico para permitir captura de todos os frames
-    // frameRate(60); // REMOVIDO - deixa o Processing rodar na velocidade que conseguir
     
-    println("=== CAPTURA INICIALIZADA ===");
-    println("MODO: Captura de TODOS os frames renderizados");
-    println("Cada frame renderizado será gravado no vídeo");
+    println("=== CAPTURA COM SINCRONIZAÇÃO REAL ===");
+    println("GARANTIA: 1 frame do vídeo = 1 linha do CSV");
+    println("Dados salvos apenas quando frame é capturado");
   }
 
   public void inicializarTiming() {
     if (!timingInitialized) {
       configurarTiming();
       timingInitialized = true;
+      nextFrameTime = msPerFrame; // Primeiro frame após msPerFrame
       println("=== TIMING INICIALIZADO ===");
-      println("Tempo inicial definido: " + tempoInicial + " ms");
-      println("Modo de captura: " + (captureAllFrames ? "TODOS os frames" : "Baseado em tempo"));
+      println("Próximo frame em: " + nextFrameTime + " ms");
     }
   }
 
   private void calcularConfiguracoes() {
-    // Calcula o número de frames baseado na duração fixa e FPS fixo
     float duracao_em_segundos = DURACAO_FIXA_MS / 1000.0;
     targetFrameCount = (int)(VIDEO_FPS * duracao_em_segundos);
     msPerFrame = DURACAO_FIXA_MS / (float)targetFrameCount;
 
-    println("=== CONFIGURAÇÃO DE VÍDEO (5 MINUTOS FIXOS) ===");
-    println("Duração do vídeo: " + duracao_em_segundos + " segundos (5 minutos)");
-    println("FPS do vídeo: " + VIDEO_FPS);
-    println("Total de frames necessários: " + targetFrameCount);
-    println("Tempo por frame: " + nf(msPerFrame, 0, 2) + " ms");
-    println("IMPORTANTE: Serão capturados " + targetFrameCount + " frames");
-    println("independentemente do tempo real que levar!");
+    println("=== CONFIGURAÇÃO SINCRONIZADA ===");
+    println("Duração: " + duracao_em_segundos + " segundos");
+    println("FPS: " + VIDEO_FPS);
+    println("Total de frames/linhas: " + targetFrameCount);
+    println("Intervalo por frame: " + nf(msPerFrame, 0, 2) + " ms");
+    println("IMPORTANTE: CSV terá EXATAMENTE " + targetFrameCount + " linhas");
   }
 
   private void configurarTiming() {
     tempoInicial = millis();
-    startTime = millis();
-    lastFrameTime = millis();
     millisSinceEpoch = System.currentTimeMillis();
-    virtualTimeMs = 0; // Inicializa tempo virtual
-    println("Timing configurado - millis atual: " + millis());
+    println("Timing configurado - início em: " + tempoInicial);
   }
 
   private void verificarFFmpeg() {
@@ -93,7 +85,7 @@ class CaptureManager {
     if (!ffmpegFile.exists()) {
       println("ERRO: FFmpeg não encontrado em: " + ffmpegPath);
     } else {
-      println("FFmpeg encontrado em: " + ffmpegPath);
+      println("FFmpeg encontrado: " + ffmpegPath);
     }
   }
 
@@ -102,8 +94,9 @@ class CaptureManager {
       int csvCount = fileManager.getNextCsvCount();
       String csvPath = fileManager.getDailyFolder() + "/dados_teclas" + csvCount + ".csv";
       output = createWriter(csvPath);
-      output.println("MillisSinceEpoch,LocalMillisProcessing,AnimacaoAtual,ValorMapeado,Valor,VirtualTime");
-      println("Arquivo CSV criado com sucesso: " + csvPath);
+      output.println("MillisSinceEpoch,TempoVideo,AnimacaoAtual,ValorMapeado,Valor,FrameNumber");
+      println("CSV criado: " + csvPath);
+      println("NOTA: CSV terá " + targetFrameCount + " linhas (1 por frame)");
     }
     catch (Exception e) {
       println("Erro ao criar CSV: " + e.getMessage());
@@ -118,14 +111,12 @@ class CaptureManager {
       videoExport = new VideoExport(parent);
       videoExport.setFfmpegPath(ffmpegPath);
       videoExport.setMovieFileName(videoPath);
-      videoExport.setFrameRate(VIDEO_FPS); // FPS fixo para o vídeo final
-      videoExport.setQuality(85, 0);
-
+      videoExport.setFrameRate(VIDEO_FPS);
+      videoExport.setQuality(70, 0); // Performance otimizada
+      
       videoExport.startMovie();
       recording = true;
-      println("Gravação de vídeo iniciada!");
-      println("O vídeo terá exatamente 5 minutos com " + VIDEO_FPS + " FPS");
-      println("Serão capturados " + targetFrameCount + " frames no total");
+      println("Vídeo iniciado: " + videoPath);
     }
     catch (Exception e) {
       println("Erro ao inicializar vídeo: " + e.getMessage());
@@ -133,93 +124,130 @@ class CaptureManager {
     }
   }
 
-  private void atualizarTiming() {
-    if (timingInitialized) {
-      millisSinceEpoch = System.currentTimeMillis();
-      // Atualiza tempo virtual baseado nos frames capturados
-      virtualTimeMs = capturedFrameCount * msPerFrame;
+  // MÉTODO PRINCIPAL: Atualiza dados a cada frame do programa
+  public void atualizarDados(int animacao, float valorMapeado, float t) {
+    if (!timingInitialized) return;
+    
+    // Atualizar cache com dados mais recentes
+    lastAnimacao = animacao;
+    lastValorMapeado = valorMapeado;
+    lastT = t;
+    
+    // Verificar se é hora de capturar frame
+    int tempoDecorrido = millis() - tempoInicial;
+    
+    if (tempoDecorrido >= nextFrameTime && capturedFrameCount < targetFrameCount) {
+      capturarFrameSincronizado();
+      
+      // Calcular próximo momento de captura
+      nextFrameTime += msPerFrame;
+    }
+    
+    // Verificar se completou
+    if (capturaCompleta()) {
+      finalizar();
     }
   }
 
-  public void salvarDadosCSV(int animacao, float valorMapeado, float t) {
-    if (output != null && timingInitialized) {
-      int currentMillis = millis() - tempoInicial;
-      output.println(millisSinceEpoch + "," + currentMillis + "," + animacao + "," + 
-                    nf(valorMapeado, 1, 3) + "," + t + "," + nf(virtualTimeMs, 0, 2));
+  // CAPTURA SINCRONIZADA: Frame + CSV simultaneamente
+  private void capturarFrameSincronizado() {
+    if (!recording || videoExport == null || output == null) return;
+    
+    try {
+      // 1. CAPTURAR FRAME
+      videoExport.saveFrame();
+      capturedFrameCount++;
+      
+      // 2. SALVAR LINHA CSV COM OS MESMOS DADOS
+      float tempoVideo = capturedFrameCount * msPerFrame;
+      long timestampAtual = System.currentTimeMillis();
+      
+      output.println(timestampAtual + "," + 
+                    nf(tempoVideo, 0, 2) + "," + 
+                    lastAnimacao + "," + 
+                    nf(lastValorMapeado, 1, 3) + "," + 
+                    lastT + "," + 
+                    capturedFrameCount);
       output.flush();
       csvLineCount++;
-    }
-  }
-
-  private boolean deveCapturarFrame() {
-    if (!timingInitialized) {
-      return false;
-    }
-    
-    // MODO CAPTURA TODOS OS FRAMES:
-    // Captura SEMPRE até atingir o número alvo de frames
-    if (captureAllFrames) {
-      return capturedFrameCount < targetFrameCount;
-    }
-    
-    // MODO BASEADO EM TEMPO (antigo - mantido como opção):
-    else {
-      int currentMillis = millis() - tempoInicial;
-      if (capturedFrameCount >= targetFrameCount || currentMillis >= DURACAO_FIXA_MS) {
-        return false;
-      }
       
-      float idealCaptureMoment = (capturedFrameCount * msPerFrame);
-      return currentMillis >= idealCaptureMoment;
-    }
-  }
-
-  private void capturarFrame() {
-    if (recording && videoExport != null) {
-      try {
-        videoExport.saveFrame();
-        capturedFrameCount++;
+      // 3. FEEDBACK
+      if (capturedFrameCount % 100 == 0 || capturedFrameCount == targetFrameCount) {
+        int tempoReal = millis() - tempoInicial;
+        float percentual = (capturedFrameCount * 100.0 / targetFrameCount);
         
-        // Atualiza tempo virtual
-        virtualTimeMs = capturedFrameCount * msPerFrame;
+        println("===== PROGRESSO SINCRONIZADO =====");
+        println("Frame/CSV: " + capturedFrameCount + "/" + targetFrameCount + 
+               " (" + nf(percentual, 1, 1) + "%)");
+        println("Tempo vídeo: " + nf(tempoVideo/1000, 1, 1) + "s");
+        println("Tempo real: " + nf(tempoReal/1000, 1, 1) + "s");
+        println("FPS efetivo: " + nf(capturedFrameCount*1000.0/tempoReal, 1, 1));
         
-        // Feedback mais frequente para acompanhar progresso
-        if (capturedFrameCount % 50 == 0 || capturedFrameCount == targetFrameCount) {
-          int tempoReal = millis() - tempoInicial;
-          float percentFrames = (capturedFrameCount * 100.0 / targetFrameCount);
-          float tempoVirtualSeg = virtualTimeMs / 1000.0;
-          float tempoRealSeg = tempoReal / 1000.0;
-          
-          println("===== PROGRESSO =====");
-          println("Frames: " + capturedFrameCount + " / " + targetFrameCount + 
-                 " (" + nf(percentFrames, 1, 1) + "%)");
-          println("Tempo virtual do vídeo: " + nf(tempoVirtualSeg, 1, 1) + " seg");
-          println("Tempo real decorrido: " + nf(tempoRealSeg, 1, 1) + " seg");
-          
-          if (tempoRealSeg > 0) {
-            float fpsReal = capturedFrameCount / tempoRealSeg;
-            println("FPS real de captura: " + nf(fpsReal, 1, 1));
-            
-            if (fpsReal < 10) {
-              println("AVISO: Captura lenta! Considere reduzir a complexidade visual.");
-            }
-          }
+        // VERIFICAÇÃO DE SINCRONIZAÇÃO
+        if (capturedFrameCount == csvLineCount) {
+          println("✓ SINCRONIZADO: " + capturedFrameCount + " frames = " + csvLineCount + " linhas");
+        } else {
+          println("⚠ ERRO DE SINCRONIZAÇÃO!");
         }
       }
-      catch (Exception e) {
-        println("Erro ao salvar frame: " + e.getMessage());
-      }
+      
+    } catch (Exception e) {
+      println("Erro na captura sincronizada: " + e.getMessage());
     }
   }
 
-  public CaptureInfo getCaptureInfo() {
-    int currentMillis = timingInitialized ? (millis() - tempoInicial) : 0;
+  private boolean capturaCompleta() {
+    return capturedFrameCount >= targetFrameCount;
+  }
+
+  public void finalizar() {
+    println("\n=== FINALIZAÇÃO ===");
     
-    // Usa tempo virtual para mostrar progresso do vídeo
-    int videoTimeMs = (int)virtualTimeMs;
+    int tempoRealTotal = millis() - tempoInicial;
+    float tempoRealSeg = tempoRealTotal / 1000.0;
+    float duracacaoVideo = capturedFrameCount / VIDEO_FPS;
+    
+    // VERIFICAÇÕES FINAIS
+    println("Tempo real execução: " + nf(tempoRealSeg, 1, 2) + "s");
+    println("Frames capturados: " + capturedFrameCount);
+    println("Linhas CSV: " + csvLineCount);
+    println("Duração vídeo: " + nf(duracacaoVideo, 1, 2) + "s");
+    
+    // VERIFICAÇÃO CRÍTICA DE SINCRONIZAÇÃO
+    if (capturedFrameCount == csvLineCount && capturedFrameCount == targetFrameCount) {
+      println("✅ PERFEITO: " + capturedFrameCount + " frames = " + csvLineCount + " linhas = 5 minutos");
+      println("✅ SINCRONIZAÇÃO GARANTIDA: Cada linha CSV corresponde a 1 frame do vídeo");
+    } else {
+      println("❌ ERRO DE SINCRONIZAÇÃO:");
+      println("  Frames: " + capturedFrameCount);
+      println("  CSV linhas: " + csvLineCount);
+      println("  Target: " + targetFrameCount);
+    }
+
+    // Fechar arquivos
+    if (output != null) {
+      output.flush();
+      output.close();
+      println("✓ CSV finalizado");
+    }
+
+    if (recording && videoExport != null) {
+      videoExport.endMovie();
+      println("✓ Vídeo finalizado");
+      recording = false;
+    }
+
+    println("=== CAPTURA CONCLUÍDA ===\n");
+    noLoop();
+  }
+
+  // GETTERS E MÉTODOS DE COMPATIBILIDADE
+  public CaptureInfo getCaptureInfo() {
+    int currentTime = timingInitialized ? (millis() - tempoInicial) : 0;
+    float tempoVideo = capturedFrameCount * msPerFrame;
 
     return new CaptureInfo(
-      videoTimeMs, // Mostra tempo do VÍDEO, não tempo real
+      (int)tempoVideo,
       DURACAO_FIXA_MS,
       capturedFrameCount,
       targetFrameCount,
@@ -236,115 +264,13 @@ class CaptureManager {
   }
 
   public float getProgress() {
-    // Progresso baseado nos frames capturados, não no tempo real
     return (float)capturedFrameCount / targetFrameCount;
   }
 
-  public float getFrameProgress() {
-    return (float)capturedFrameCount / targetFrameCount;
-  }
-
-  public void executarCaptura() {
-    try {
-      if (!timingInitialized) {
-        return;
-      }
-      
-      atualizarTiming();
-
-      // SEMPRE tenta capturar se deve
-      if (deveCapturarFrame()) {
-        capturarFrame();
-      }
-
-      if (capturaCompleta()) {
-        finalizar();
-      }
-    }
-    catch (Exception e) {
-      println("Erro na captura: " + e.getMessage());
-    }
-  }
-
-  private boolean capturaCompleta() {
-    if (!timingInitialized) return false;
-    
-    // Completa quando captura todos os frames necessários
-    return capturedFrameCount >= targetFrameCount;
-  }
-
-  public void finalizar() {
-    println("\n=== FINALIZANDO CAPTURA ===");
-    
-    // Informações finais
-    int tempoRealTotal = timingInitialized ? (millis() - tempoInicial) : 0;
-    float tempoRealSeg = tempoRealTotal / 1000.0;
-    float tempoVideoSeg = (capturedFrameCount / VIDEO_FPS);
-    
-    println("Frames capturados: " + capturedFrameCount + " de " + targetFrameCount);
-    println("Duração do vídeo: " + nf(tempoVideoSeg, 1, 2) + " segundos");
-    println("Tempo real de captura: " + nf(tempoRealSeg, 1, 2) + " segundos");
-    
-    if (capturedFrameCount == targetFrameCount) {
-      println("SUCESSO: Vídeo terá exatamente 5 minutos!");
-    } else if (capturedFrameCount < targetFrameCount) {
-      println("AVISO: Capturados apenas " + capturedFrameCount + " frames.");
-      println("O vídeo terá " + nf(tempoVideoSeg, 1, 2) + " segundos ao invés de 300.");
-    }
-
-    if (output != null) {
-      output.flush();
-      output.close();
-      println("CSV fechado com sucesso");
-    }
-
-    if (recording && videoExport != null) {
-      videoExport.endMovie();
-      println("Vídeo finalizado com sucesso");
-      recording = false;
-    }
-
-    println("=== CAPTURA CONCLUÍDA ===\n");
-    noLoop();
-  }
-
-  // Método para alternar entre modos de captura
-  public void setCaptureMode(boolean captureAll) {
-    captureAllFrames = captureAll;
-    println("Modo de captura alterado para: " + 
-           (captureAllFrames ? "TODOS os frames" : "Baseado em tempo"));
-  }
-
-  // Método para configuração personalizada
-  public void configurarVideoPersonalizado(int novoTargetFrames, int novoMaxMillis) {
-    // Ignora novoMaxMillis pois sempre será 5 minutos
-    println("NOTA: Duração fixa em 5 minutos. Ajustando apenas número de frames.");
-    
-    if (novoTargetFrames > 0) {
-      // Calcula o FPS necessário para ter 5 minutos com o número de frames desejado
-      float novoFPS = novoTargetFrames / 300.0; // 300 segundos = 5 minutos
-      println("Para " + novoTargetFrames + " frames em 5 minutos, FPS seria: " + nf(novoFPS, 1, 2));
-      
-      // Mantém o targetFrameCount conforme solicitado
-      targetFrameCount = novoTargetFrames;
-      msPerFrame = DURACAO_FIXA_MS / (float)targetFrameCount;
-      
-      println("Configuração ajustada:");
-      println("- Frames alvo: " + targetFrameCount);
-      println("- Tempo por frame: " + nf(msPerFrame, 0, 2) + " ms");
-    }
-  }
-  
   public boolean isTimingInitialized() {
     return timingInitialized;
   }
-  
-  // NOVO: Método para obter tempo virtual (útil para sincronização)
-  public float getVirtualTimeMs() {
-    return virtualTimeMs;
-  }
-  
-  // NOVO: Método para obter informações de performance
+
   public String getPerformanceInfo() {
     if (!timingInitialized) return "Não inicializado";
     
@@ -352,9 +278,23 @@ class CaptureManager {
     if (tempoReal <= 0) return "Calculando...";
     
     float fpsReal = (capturedFrameCount * 1000.0) / tempoReal;
-    float tempoEstimado = (targetFrameCount / fpsReal);
+    float tempoVideo = capturedFrameCount * msPerFrame / 1000.0;
     
-    return "FPS real: " + nf(fpsReal, 1, 1) + 
-           " | Tempo estimado total: " + nf(tempoEstimado, 1, 1) + " seg";
+    return "Próximo frame: " + nf((nextFrameTime - tempoReal)/1000.0, 1, 1) + "s" +
+           " | Video: " + nf(tempoVideo, 1, 1) + "s/300s" +
+           " | Sync: " + capturedFrameCount + "/" + csvLineCount;
+  }
+
+  // MÉTODOS ANTIGOS MANTIDOS PARA COMPATIBILIDADE
+  public void executarCaptura() {
+    // Método vazio - usar atualizarDados() no lugar
+  }
+
+  public void executarCapturaSincronizada(int animacao, float valorMapeado, float t) {
+    atualizarDados(animacao, valorMapeado, t);
+  }
+
+  public void salvarDadosCSV(int animacao, float valorMapeado, float t) {
+    atualizarDados(animacao, valorMapeado, t);
   }
 }

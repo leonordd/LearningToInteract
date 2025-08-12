@@ -136,16 +136,19 @@ void draw() {
     updateAnimationCounter();
 
     int valor = round(map(t, 0.0, 11.0, 0, 8));
-    captureManager.salvarDadosCSV(currentAnimation, valor, t);
+
+    captureManager.atualizarDados(currentAnimation, valor, t);
     updateDebugWindow_Captura(t, valor);
-    captureManager.executarCaptura();
+    /*captureManager.salvarDadosCSV(currentAnimation, valor, t);
+     updateDebugWindow_Captura(t, valor);
+     captureManager.executarCaptura();*/
   } else if (modeManager.isModoJogo()) {
 
     if (!estavaNoModoJogo) {
       println("Entrou no modo jogo. A iniciar script Python...");
       iniciarScriptPython();
       estavaNoModoJogo = true;
-      
+
       if (!captureManager.isTimingInitialized()) {
         captureManager.inicializarTiming();
         println("Timing inicializado para modo jogo!");
@@ -195,7 +198,11 @@ void draw() {
       // Enviar informações para a janela de debug
       network.sendAnimationData(currentAnimation, td, isTransitioning, targetAnimation);
       updateDebugWindow_Jogo(networkData);
-      captureManager.executarCaptura(); //captura apenas o ecrã
+      
+      int valor = round(map(td, 0.0, 11.0, 0, 8));
+      captureManager.executarCapturaSincronizada(currentAnimation, valor, td);
+
+      //captureManager.executarCaptura(); //captura apenas o ecrã
     }
   } else if (modeManager.isModoJogoComTreino()) {
     //recebe um ficheiro de python diferente
