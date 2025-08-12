@@ -101,7 +101,6 @@ void setup() {
   // Inicializar baseado no modo selecionado
   if (modeManager.isModoCaptura()) {
     initializeAllAnimations(n_circles);
-    captureManager.inicializar();
     //captureManager.configurarVideoPersonalizado(300000, 30.0); // 5 minutos (300000ms), 30 FPS
   } else if (modeManager.isModoJogo()) {
     network.beginConnection();
@@ -111,7 +110,7 @@ void setup() {
     network.beginConnection();
     initializeAllAnimations(n_circles);
   }
-
+  captureManager.inicializar();
 }
 
 void draw() {
@@ -139,7 +138,6 @@ void draw() {
 
     captureManager.atualizarDados(currentAnimation, valor, t);
     updateDebugWindow_Captura(t, valor);
-
   } else if (modeManager.isModoJogo()) {
 
     if (!estavaNoModoJogo) {
@@ -204,12 +202,11 @@ void draw() {
     }
   } else if (modeManager.isModoJogoComTreino()) {
     print("A");
-    
+
     //iniciar script de python com path "1input_not_pred.py"
     //iniciarScriptPythonTreino();
     //receber valor da animação (ou seja as classes predicted 1,2,3,4)
     //update currentAnimation para o valor da animação. Ou seja selecionar a animação consoante o (valor que vem da rede - 1)
-    
   } else {
     if (estavaNoModoJogo) {
       println("Saiu do modo jogo. A terminar script Python...");

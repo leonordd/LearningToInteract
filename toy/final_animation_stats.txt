@@ -1,7 +1,7 @@
 === ESTATÍSTICAS DAS ANIMAÇÕES ===
-Total de frames: 12185
+Total de frames: 1703
 
-Animação 0: 4527 frames (37.15%)
-Animação 1: 1822 frames (14.95%)
-Animação 2: 3320 frames (27.25%)
-Animação 3: 2516 frames (20.65%)
+Animação 0: 965 frames (56.66%)
+Animação 1: 370 frames (21.73%)
+Animação 2: 368 frames (21.61%)
+Animação 3: 0 frames (0.00%)
