@@ -840,4 +840,3 @@ print(f"   - Modelo: {model_save_path}")
 print(f"   - Estatísticas: {stats_path}")
 print(f"   - Gráficos: training_curves_coordinates_only.png, confusion_matrix_coordinates_only.png")
 print(f"\n✅ Implementação do modelo APENAS COM COORDENADAS concluída!")
-
