@@ -332,78 +332,6 @@ print(f"Shape do DataFrame original: {merged_df.shape}")
 # ============================================================================
 
 print("\n=== EXCLUSÃO DAS FEATURES DE VISIBILIDADE ===")
-"""
-# Definir features de visibilidade a serem excluídas
-visibility_features_to_exclude = ['Face','Pose','RightHand','LeftHand']
-
-# Colunas a excluir (features de visibilidade + colunas não-feature)
-excluded_columns = ['MillisSinceEpoch','LocalMillisProcessing','AnimacaoAtual','VirtualTime','ValorMapeado','Valor'] + visibility_features_to_exclude
-
-print("AQUI", excluded_columns)
-# Verificar quais features de visibilidade existem no dataset
-existing_visibility_features = [col for col in visibility_features_to_exclude if col in merged_df.columns]
-missing_visibility_features = [col for col in visibility_features_to_exclude if col not in merged_df.columns]
-
-print(f"🔍 Features de visibilidade encontradas no dataset: {existing_visibility_features}")
-if missing_visibility_features:
-    print(f"⚠️ Features de visibilidade NÃO encontradas: {missing_visibility_features}")
-
-# Se não encontrou as features com nomes exatos, assumir que são as primeiras 4 colunas
-if not existing_visibility_features:
-    print(f"⚠️ Nenhuma feature de visibilidade encontrada com nomes esperados.")
-    print(f"Assumindo que as primeiras 4 colunas são features de visibilidade...")
-    all_columns = [col for col in merged_df.columns if col not in ['MillisSinceEpoch','LocalMillisProcessing','AnimacaoAtual','ValorMapeado', 'Valor','VirtualTime']]
-    if len(all_columns) >= 4:
-        existing_visibility_features = all_columns[:4]
-        excluded_columns.extend(existing_visibility_features)
-        print(f"Features assumidas como visibilidade (EXCLUÍDAS): {existing_visibility_features}")
-    else:
-        print(f"❌ ERRO: Dataset não tem features suficientes!")
-
-# Selecionar apenas features de coordenadas
-#coordinate_features = [col for col in merged_df.columns if col not in excluded_columns]
-#coordinate_features = [col for col in merged_df.columns if col not in['MillisSinceEpoch','LocalMillisProcessing','AnimacaoAtual','ValorMapeado', 'Valor', 'Face', 'Pose', 'RightHand', 'LeftHand']]
-def exclude_columns_by_pattern(df, exclude_patterns):
-    all_columns = df.columns.tolist()
-    columns_to_exclude = []
-    
-    for col in all_columns:
-        for pattern in exclude_patterns:
-            if col.startswith(pattern) or col == pattern:
-                columns_to_exclude.append(col)
-                break
-    
-    coordinate_features = [col for col in all_columns if col not in columns_to_exclude]
-    return coordinate_features, columns_to_exclude
-
-exclude_patterns = ['MillisSinceEpoch', 'LocalMillisProcessing', 'AnimacaoAtual','VirtualTime',
-                   'ValorMapeado', 'Valor', 'Face', 'Pose', 'RightHand', 'LeftHand']
-
-coordinate_features, excluded_columns_actual = exclude_columns_by_pattern(merged_df, exclude_patterns)
-
-print(f"\n✅ RESULTADO DA SELEÇÃO:")
-print(f"   Features de visibilidade EXCLUÍDAS ({len(existing_visibility_features)}): {existing_visibility_features}")
-print(f"   Features de coordenadas MANTIDAS ({len(coordinate_features)}): {coordinate_features[:10]}... (+{len(coordinate_features)-10} mais)")
-print(f"   Total de features para treino: {len(coordinate_features)}")
-
-if len(coordinate_features) == 0:
-    raise ValueError("❌ ERRO: Nenhuma feature de coordenada restante após exclusão!")
-
-# ============================================================================
-# ANÁLISE DAS FEATURES DE COORDENADAS
-# ============================================================================
-#all_500_mask = detect_all_500_samples(merged_df, coordinate_features)
-
-print(f"\n=== ANÁLISE DAS FEATURES DE COORDENADAS ===")
-
-# Selecionar apenas dados de coordenadas
-X_coordinates_df = merged_df[coordinate_features].copy()
-
-print(f"Dados de coordenadas selecionados - Shape: {X_coordinates_df.shape}")
-print(f"Estatísticas básicas das coordenadas:")
-print(X_coordinates_df.describe().round(3))
-"""
-
 # Colunas a excluir (features de visibilidade + colunas não-feature)
 excluded_columns = ['MillisSinceEpoch','TempoVideo','AnimacaoAtual','ValorMapeado','Valor','FrameNumber','Face','Pose','RightHand','LeftHand'] 
 print("Excluded Columns", excluded_columns)
@@ -428,50 +356,13 @@ print(X_coordinates_df.describe().round(3))
 print(f"\n=== FILTRAGEM DE LINHAS COM VALORES 500.0 ===")
 X_coordinates_df = X_coordinates_df.replace(500.0, 0.0)  # Substituir 500.0 por 0.0
 print(f"X_coordinates_df {X_coordinates_df}")
-# Analisar quantas linhas contêm valores 500.0
-"""rows_with_500 = (X_coordinates_df == 500.0).any(axis=1)
-num_rows_with_500 = rows_with_500.sum()
 
-print(f"Linhas com pelo menos um valor 500.0: {num_rows_with_500}")
-print(f"Percentagem de linhas com valores 500.0: {(num_rows_with_500 / len(X_coordinates_df)) * 100:.2f}%")
-
-
-
-# Analisar quantas features têm valor 500.0 por linha
-features_500_per_row = (X_coordinates_df == 500.0).sum(axis=1)
-print(f"Distribuição de features com valor 500.0 por linha:")
-print(features_500_per_row.value_counts().sort_index())
-
-# Filtrar linhas que NÃO contêm nenhum valor 500.0 E "valor" diferente de 0
-clean_mask = ~rows_with_500  #& (~rows_with_valor_0)
-X_coordinates_clean = X_coordinates_df[clean_mask].copy()
-merged_df_clean = merged_df[clean_mask].copy()
-
-print(f"\nApós filtrar linhas com valores 500.0:")
-print(f"Shape original: {X_coordinates_df.shape}")
-print(f"Shape após filtro: {X_coordinates_clean.shape}")
-print(f"Linhas removidas: {num_rows_with_500}")
-print(f"Linhas mantidas: {len(X_coordinates_clean)}")
-
-# Verificar se ainda existem valores 500.0
-remaining_500 = (X_coordinates_clean == 500.0).sum()
-print(f"Valores 500.0 restantes após filtro: {remaining_500}")"""
-
-#remover todas as linhas com 500 e com 0
 # ============================================================================
 # ANÁLISE FINAL DOS DADOS PROCESSADOS
 # ============================================================================
 #print("X_coordinates_clean", X_coordinates_clean)
 print(f"\n=== ANÁLISE DOS DADOS PROCESSADOS ===")
-
 print("Estatísticas APÓS o preprocessamento completo:")
-#print(f"  Shape final: {X_coordinates_clean.shape}")
-"""print("\n  Estatísticas por coluna:")
-for col in X_coordinates_clean.columns:
-    print(f"    {col}: min={X_coordinates_clean[col].min():.3f}, "
-          f"max={X_coordinates_clean[col].max():.3f}, "
-          f"mean={X_coordinates_clean[col].mean():.6f}, "
-          f"std={X_coordinates_clean[col].std():.6f}")"""
 
 # Usar dados como features finais
 X_final = X_coordinates_df #
@@ -480,21 +371,6 @@ final_feature_names = coordinate_features
 
 #Y_final = merged_df_clean['AnimacaoAtual'].copy()
 Y_final = merged_df['AnimacaoAtual'].copy()
-
-"""print(f"Valor(output):\n{merged_df['AnimacaoAtual']}")
-print(f"\nEstatísticas da coluna 'AnimacaoAtual':")
-print(f"  Min: {merged_df['AnimacaoAtual'].min():.3f}")
-print(f"  Max: {merged_df['AnimacaoAtual'].max():.3f}")
-print(f"  Média: {merged_df['AnimacaoAtual'].mean():.6f}")
-print(f"  Desvio padrão: {merged_df['AnimacaoAtual'].std():.6f}")
-print(f"  Valores únicos na coluna 'AnimacaoAtual': {sorted(merged_df['AnimacaoAtual'].unique())}")
-
-print(f"\n🎯 FEATURES FINAIS:")
-print(f"  Total de features: {len(final_feature_names)}")
-print(f"  Tipo: APENAS coordenadas (features de visibilidade excluídas)")
-print(f"  Preprocessamento: Remover os valores 500.0")
-print(f"  Primeiras 10 features: {final_feature_names[:10]}")"""
-
 
 # Converter para tensors
 X = torch.tensor(X_final.values, dtype=torch.float32)
@@ -779,7 +655,6 @@ for epoch in range(epochs):
 print(f"\n=== TREINO CONCLUÍDO ===")
 print(f"Melhor Test Accuracy: {best_test_acc:.2f}%")
 print(f"Melhor Weighted Accuracy: {best_weighted_acc:.2f}%")
-
 
 """# 5. ANÁLISE COMPLETA COM ESTATÍSTICAS"""
 
