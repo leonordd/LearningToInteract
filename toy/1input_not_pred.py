@@ -1,34 +1,89 @@
-#correr este codigo
+# 3realtime_prediction.py
+# Sistema de Predições em Tempo Real com MediaPipe
+# Carrega modelo treinado e faz inferências em tempo real
+
+"""
+Sistema de Predições em Tempo Real
+Versão baseada no sistema de captura com predições de IA
+
+Autor: Sistema de Predições
+Data: 2025
+Funcionalidades:
+- Carregamento do modelo treinado
+- Captura de landmarks em tempo real
+- Predições instantâneas
+- Visualização da predição atual
+- Modo de debug com confiança
+"""
+
 import cv2
 import mediapipe as mp
-import csv
-import os
-import time
-from datetime import datetime
-import joblib
-import numpy as np
-from typing import Dict, List, Tuple, Optional
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
+import time
+from pathlib import Path
+from typing import Dict, List, Tuple, Optional
+import json
 
-import warnings
-warnings.filterwarnings("ignore")
 
-# =============== MODELO DA REDE NEURONAL MODIFICADO ===============
-class WeightedFlexibleModel(nn.Module):
-    def __init__(self, input_size, output_size, hidden_layers=[10], class_weights=None):
+# ===========================================================================================
+# CONFIGURAÇÕES GLOBAIS
+# ===========================================================================================
+
+class PredictionConfig:
+    """Configurações centralizadas do sistema de predição."""
+    
+    # Câmara
+    CAMERA_WIDTH = 640
+    CAMERA_HEIGHT = 480
+    CAMERA_FPS = 60
+    
+    # MediaPipe
+    MIN_DETECTION_CONFIDENCE = 0.5
+    MIN_TRACKING_CONFIDENCE = 0.5
+    MODEL_COMPLEXITY = 0  # 0=rápido, 2=preciso
+    
+    # Landmarks
+    NUM_POSE_LANDMARKS = 33
+    NUM_HAND_LANDMARKS = 21
+    NUM_FACE_LANDMARKS = 468
+    DEFAULT_LANDMARK_VALUE = 0.0  # Valor para landmarks não detectados
+    
+    # Visualização
+    SQUARE_SIZE = 3
+    FACE_SQUARE_SIZE = 1
+    SQUARE_COLOR = (255, 255, 255)  # Branco (BGR)
+    
+    # Predições
+    CONFIDENCE_THRESHOLD = 0.3  # Limiar mínimo para mostrar predição
+    SMOOTHING_WINDOW = 5  # Janela para suavização de predições
+    PREDICTION_DISPLAY_TIME = 2000  # ms para mostrar predição
+    
+    # Debug
+    SHOW_DEBUG_INFO = True
+    FPS_UPDATE_INTERVAL = 30  # Atualizar FPS a cada 30 frames
+
+
+# ===========================================================================================
+# MODELO DE REDE NEURAL (DEVE SER IDÊNTICO AO TREINO)
+# ===========================================================================================
+
+class WeightedFlexibleModel(torch.nn.Module):
+    """Modelo de rede neural flexível com pesos por classe."""
+    
+    def __init__(self, input_size, output_size, hidden_layers, class_weights=None):
         super().__init__()
         
         self.class_weights = class_weights
         layer_sizes = [input_size] + hidden_layers + [output_size]
         
-        self.layers = nn.ModuleList()
+        self.layers = torch.nn.ModuleList()
         for i in range(len(layer_sizes) - 1):
-            self.layers.append(nn.Linear(layer_sizes[i], layer_sizes[i + 1]))
+            self.layers.append(torch.nn.Linear(layer_sizes[i], layer_sizes[i + 1]))
             
-        self.dropout = nn.Dropout(0.2)
-        self.activation = nn.ReLU()  # Usar ReLU
+        self.dropout = torch.nn.Dropout(0.2)
+        self.activation = torch.nn.ReLU()
         
     def forward(self, x):
         for layer in self.layers[:-1]:
@@ -36,1100 +91,556 @@ class WeightedFlexibleModel(nn.Module):
             x = self.activation(x)
             x = self.dropout(x)
         
-        # Última camada sem ativação (será aplicado softmax na loss)
+        # Última camada sem ativação
         logits = self.layers[-1](x)
-        
         return logits
-
-# =============== CLASSE PARA PREDIÇÃO DO MODELO ===============
-class ModelPredictor:
-    def __init__(self, model_path: str, scaler_path: str = None, imputer_path: str = None,
-                 null_threshold: float = 0.95, confidence_threshold: float = 0.3):
-        """
-        Inicializa o preditor do modelo.
-        
-        Args:
-            model_path: Caminho para o modelo treinado
-            scaler_path: Caminho para o StandardScaler
-            imputer_path: Caminho para o SimpleImputer
-            null_threshold: Proporção de features 500.0 para considerar amostra inválida
-            confidence_threshold: Threshold mínimo de confiança para fazer predição
-        """
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.null_threshold = null_threshold
-        self.confidence_threshold = confidence_threshold
-        print(f"A usar o device: {self.device}")
-        
-        # Carregar informações do modelo
-        self.model_data = torch.load(model_path, map_location='cpu', weights_only=False)
-        self.model = self.load_model()
-        
-        # Guardar informações importantes do modelo
-        self.input_size = self.model_data['input_size']
-        self.output_size = self.model_data['output_size']
-        self.preprocessing_strategy = self.model_data.get('preprocessing_strategy', 'none')
-        
-        # Extrair mapeamento de classes
-        if 'class_mapping' in self.model_data:
-            self.internal_to_real = self.model_data['class_mapping']['internal_to_real']
-            self.real_to_internal = self.model_data['class_mapping']['real_to_internal']
-            # Criar nomes de classes baseados no mapeamento real (1-4)
-            self.class_names = [f"Classe {self.internal_to_real[i]}" for i in range(self.output_size)]
-        else:
-            # Fallback se não houver mapeamento
-            self.internal_to_real = {i: i+1 for i in range(self.output_size)}
-            self.class_names = [f"Classe {i+1}" for i in range(self.output_size)]
-        
-        # Carregar preprocessadores salvos do treino
-        """if scaler_path and imputer_path:
-            try:
-                self.scaler = joblib.load(scaler_path)
-                self.imputer = joblib.load(imputer_path)
-                print("✓ Scaler e Imputer carregados do treino")
-                
-                # Verificar medianas do imputer
-                if hasattr(self.imputer, 'statistics_'):
-                    print(f"✓ Medianas carregadas: {len(self.imputer.statistics_)} features")
-                    print(f"  Exemplo medianas: {self.imputer.statistics_[:5]}")
-            except Exception as e:
-                print(f"⚠️ Erro ao carregar preprocessadores: {e}")
-                self.scaler = None
-                self.imputer = None
-        else:
-            self.scaler = None
-            self.imputer = None
-            print("⚠️ AVISO: Sem Scaler/Imputer - preprocessamento pode estar incorreto!")"""
-        self.scaler = None
-        self.imputer = None
-        print("✓ Preprocessamento: Básico (sem scaler/imputer)")
-
-        # Debug do modelo carregado
-        print("\n=== INFO DO MODELO ===")
-        print(f"✓ Modelo carregado: {self.input_size} inputs, {self.output_size} outputs")
-        print(f"✓ Classes de saída: 1-4 (internamente 0-3)")
-        print(f"Hidden layers: {self.model_data.get('hidden_layers', 'N/A')}")
-        print(f"Preprocessing: {self.preprocessing_strategy}")
-        print(f"Classes: {self.class_names}")
-        print(f"Null threshold: {self.null_threshold*100:.0f}%")
-        print(f"Confidence threshold: {self.confidence_threshold*100:.0f}%")
-        
-        # Mostrar pesos das classes se disponíveis
-        if 'class_weights' in self.model_data:
-            weights = self.model_data['class_weights']
-            print(f"Pesos das classes:")
-            for i, weight in enumerate(weights):
-                real_class = self.internal_to_real.get(i, i+1)
-                print(f"  Classe {real_class}: peso {weight:.2f}")
-
-    def load_model(self) -> nn.Module:
-        """Carrega o modelo treinado."""
-        state_dict = self.model_data['model_state_dict']
-        input_size = self.model_data['input_size']
-        output_size = self.model_data['output_size']
-        hidden_layers = self.model_data['hidden_layers']
-        class_weights = self.model_data.get('class_weights', None)
-        
-        # Criar modelo com a mesma arquitetura
-        model = WeightedFlexibleModel(
-            input_size=input_size,
-            output_size=output_size,
-            hidden_layers=hidden_layers,
-            class_weights=torch.tensor(class_weights) if class_weights else None
-        ).to(self.device)
-        
-        # Carregar pesos
-        model.load_state_dict(state_dict)
-        model.eval()  # Modo de avaliação
-        
-        return model
     
-    def check_invalid_sample(self, raw_data: List[float]) -> Tuple[bool, float]:
-        """
-        Verifica se a amostra tem muitos valores 500.0 (não detectados).
-        
-        Returns:
-            (is_invalid, null_proportion)
-        """
-        null_count = raw_data.count(500.0)
-        null_proportion = null_count / len(raw_data)
-        is_invalid = null_proportion >= self.null_threshold
-        
-        return is_invalid, null_proportion
-    
-    def preprocess_data(self, raw_data: List[float], debug: bool = False) -> torch.Tensor:
-        """
-        Preprocessa os dados EXATAMENTE como no treino.
-        
-        Args:
-            raw_data: Lista com os valores das landmarks
-            debug: Se deve imprimir informações de debug
-            
-        Returns:
-            Tensor processado pronto para o modelo
-        """
-        if debug:
-            print(f"\n=== DEBUG: Preprocessamento ===")
-            print(f"Estratégia de preprocessamento: {self.preprocessing_strategy}")
-        
-        # Converter para numpy array e reshape para 2D (necessário para sklearn)
-        data = np.array(raw_data, dtype=np.float32).reshape(1, -1)
-        
-        if debug:
-            num_500s = (data == 500.0).sum()
-            total_values = data.size
-            print(f"Shape dos dados: {data.shape}")
-            print(f"Valores 500.0 encontrados: {num_500s} de {total_values} ({num_500s/total_values*100:.1f}%)")
-            print(f"Min: {np.min(data):.3f}, Max: {np.max(data):.3f}, Mean: {np.mean(data):.3f}")
-        
-        """if self.scaler is not None and self.imputer is not None:
-            # USAR O MESMO PIPELINE DO TREINO
-            
-            # 1. Substituir 500.0 por NaN
-            if debug:
-                print("\n1. Substituindo 500.0 por NaN...")
-            
-            data_with_nan = data.copy()
-            data_with_nan[data_with_nan == 500.0] = np.nan
-            
-            if debug:
-                nan_count = np.isnan(data_with_nan).sum()
-                print(f"   Valores NaN após substituição: {nan_count}")
-            
-            # 2. Imputar com mediana (a usar o imputer treinado)
-            if debug:
-                print("2. Aplicar imputação com mediana do treino...")
-            
-            data_imputed = self.imputer.transform(data_with_nan)
-            
-            if debug:
-                print(f"   Após imputação - Min: {data_imputed.min():.3f}, Max: {data_imputed.max():.3f}")
-                remaining_nans = np.isnan(data_imputed).sum()
-                print(f"   NaNs restantes: {remaining_nans}")
-            
-            # 3. Normalizar com StandardScaler (a usar o scaler treinado)
-            if debug:
-                print("3. Aplicar normalização StandardScaler do treino...")
-            
-            data_normalized = self.scaler.transform(data_imputed)
-            
-            if debug:
-                print(f"   Após normalização - Min: {data_normalized.min():.3f}, Max: {data_normalized.max():.3f}")
-                print(f"   Média: {data_normalized.mean():.6f}, Std: {data_normalized.std():.6f}")
-                
-                # Verificar valores extremos
-                extreme_high = (data_normalized > 3).sum()
-                extreme_low = (data_normalized < -3).sum()
-                if extreme_high > 0 or extreme_low > 0:
-                    print(f"   ⚠️ Valores extremos: {extreme_high} > 3, {extreme_low} < -3")
-            
-            data = data_normalized
-        
-        else:
-            # Fallback se não tiver os preprocessadores
-            print("⚠️ AVISO: Usa preprocessamento básico (não recomendado)")
-            print("   O modelo pode não funcionar corretamente!")
-            
-            # Substituir 500.0 por 0.5 (centro)
-            data[data == 500.0] = 0.5
-            
-            # Clip básico para garantir range [0, 1]
-            data = np.clip(data, 0, 1)
-            
-            if debug:
-                print(f"   Preprocessamento básico - Min: {data.min():.3f}, Max: {data.max():.3f}")
-        """
-        # Preprocessamento básico: substituir valores ausentes por 0.0
-        if debug:
-            print("Preprocessamento básico: substituir 0.0 e normalizar para [0,1]")
-
-        # Substituir valores ausentes (500.0) por 0.0
-        data[data == 500.0] = 0.0
-
-        # (Opcional) Clip dos dados para garantir valores entre 0 e 1
-        data = np.clip(data, 0, 1)
-
-        if debug:
-            print(f"   Min: {data.min():.3f}, Max: {data.max():.3f}, Mean: {data.mean():.3f}")
-
-        # Converter para tensor PyTorch
-        tensor_data = torch.FloatTensor(data).to(self.device)
-        
-        if debug:
-            print(f"\nShape do tensor final: {tensor_data.shape}")
-        
-        return tensor_data
-    
-    def predict(self, raw_data: List[float], debug: bool = False) -> Dict[str, any]:
-        """
-        Faz a predição com os dados de entrada.
-        
-        NOVO COMPORTAMENTO:
-        - Retorna classe -1 (sem predição) se muitos valores são 500.0
-        - Retorna classes 1-4 (não 0-3)
-        - Aplica threshold de confiança
-        
-        Args:
-            raw_data: Lista com os valores das landmarks
-            debug: Se deve imprimir informações de debug
-            
-        Returns:
-            Dicionário com a classe predita e probabilidades
-        """
-        if debug:
-            print(f"\n=== DEBUG: Predição ===")
-        
-        # Verificar se temos o número correto de features
-        if len(raw_data) != self.input_size:
-            if debug:
-                print(f"ERRO: Número incorreto de features!")
-            return {
-                'error': f'Número incorreto de features: esperado {self.input_size}, recebido {len(raw_data)}',
-                'predicted_class': -1,
-                'confidence': 0.0,
-                'valid': False
-            }
-        
-        # VERIFICAR SE A AMOSTRA É INVÁLIDA (muitos 500.0)
-        is_invalid, null_proportion = self.check_invalid_sample(raw_data)
-        
-        if is_invalid:
-            if debug or null_proportion > 0.8:
-                print(f"\n⚠️ AMOSTRA INVÁLIDA: {null_proportion*100:.1f}% dos valores são 500.0")
-                print(f"   Threshold: {self.null_threshold*100:.0f}%")
-                print(f"   → Não fazendo predição")
-            
-            return {
-                'predicted_class': -1,
-                'class_name': 'Sem Predição (muitos valores ausentes)',
-                'confidence': 0.0,
-                'all_probabilities': np.zeros(self.output_size),
-                'valid': False,
-                'null_proportion': null_proportion,
-                'reason': 'too_many_nulls'
-            }
-        
-        # Analisar dados brutos antes do preprocessamento
-        num_500s = raw_data.count(500.0)
-        if debug and num_500s > 0:
-            print(f"\n⚠️ {num_500s} valores 500.0 nos dados de entrada ({num_500s/len(raw_data)*100:.1f}%)")
-            print(f"   Estes valores serão imputados com as medianas do treino")
-        
-        # Preprocessar dados
-        processed_data = self.preprocess_data(raw_data, debug)
-        
-        # Fazer predição
+    def predict_with_confidence(self, x):
+        """Predição com cálculo de confiança."""
+        self.eval()
         with torch.no_grad():
-            outputs = self.model(processed_data)
+            logits = self.forward(x)
+            probs = F.softmax(logits, dim=1)
+            confidences, predictions = torch.max(probs, dim=1)
             
-            if debug:
-                print(f"\nOutputs do modelo (logits): {outputs[0].cpu().numpy()}")
-            
-            probabilities = F.softmax(outputs, dim=1)
-            confidence, predicted_class_internal = torch.max(probabilities, 1)
-            
-            # Converter de classe interna (0-3) para classe real (1-4)
-            predicted_class_internal = predicted_class_internal.item()
-            predicted_class_real = self.internal_to_real.get(predicted_class_internal, predicted_class_internal + 1)
-            
-            if debug:
-                # Imprimir top 3 classes
-                k = min(3, self.output_size)
-                top_probs, top_classes = torch.topk(probabilities[0], k)
-                print(f"\nTop {k} predições:")
-                for i, (prob, cls) in enumerate(zip(top_probs, top_classes)):
-                    real_class = self.internal_to_real.get(cls.item(), cls.item() + 1)
-                    print(f"  {i+1}. Classe {real_class}: {prob.item()*100:.1f}%")
+            return predictions, confidences, probs
+
+
+# ===========================================================================================
+# CARREGADOR DE MODELO
+# ===========================================================================================
+
+class ModelLoader:
+    """Classe para carregar o modelo treinado e suas configurações."""
+    
+    def __init__(self, model_path: str):
+        self.model_path = model_path
+        self.model = None
+        self.model_info = None
+        self.feature_names = None
+        self.device = self._get_device()
         
-        # Converter resultados para Python nativo
-        confidence = confidence.item()
-        all_probabilities = probabilities[0].cpu().numpy()
-        
-        # VERIFICAR THRESHOLD DE CONFIANÇA
-        if confidence < self.confidence_threshold:
-            if debug:
-                print(f"\n⚠️ CONFIANÇA BAIXA: {confidence*100:.1f}% < {self.confidence_threshold*100:.0f}%")
-                print(f"   → Não fazendo predição")
+        self._load_model()
+    
+    def _get_device(self):
+        """Determina o dispositivo disponível."""
+        if torch.cuda.is_available():
+            return "cuda"
+        elif torch.backends.mps.is_available():
+            return "mps"
+        else:
+            return "cpu"
+    
+    def _load_model(self):
+        """Carrega o modelo e suas informações."""
+        try:
+            print(f"[MODEL] Carregando modelo de: {self.model_path}")
             
-            return {
-                'predicted_class': -1,
-                'class_name': 'Sem Predição (confiança baixa)',
-                'confidence': confidence,
-                'all_probabilities': all_probabilities,
-                'valid': False,
-                'null_proportion': null_proportion,
-                'reason': 'low_confidence',
-                'best_guess': predicted_class_real
-            }
-        
-        # PREDIÇÃO VÁLIDA
+            # Carregar informações do modelo
+            checkpoint = torch.load(self.model_path, map_location=self.device)
+            self.model_info = checkpoint
+            
+            # Extrair configurações
+            input_size = checkpoint['input_size']
+            output_size = checkpoint['output_size']
+            hidden_layers = checkpoint['hidden_layers']
+            
+            # Criar modelo
+            self.model = WeightedFlexibleModel(
+                input_size=input_size,
+                output_size=output_size,
+                hidden_layers=hidden_layers
+            ).to(self.device)
+            
+            # Carregar pesos
+            self.model.load_state_dict(checkpoint['model_state_dict'])
+            self.model.eval()
+            
+            # Extrair informações de features
+            if 'feature_info' in checkpoint:
+                self.feature_names = checkpoint['feature_info'].get('feature_order', [])
+            
+            print(f"[MODEL] ✅ Modelo carregado com sucesso!")
+            print(f"[MODEL] Device: {self.device}")
+            print(f"[MODEL] Input size: {input_size}")
+            print(f"[MODEL] Output size: {output_size}")
+            print(f"[MODEL] Hidden layers: {hidden_layers}")
+            print(f"[MODEL] Features: {len(self.feature_names) if self.feature_names else 'N/A'}")
+            
+            # Mostrar métricas se disponíveis
+            if 'best_accuracy' in checkpoint:
+                print(f"[MODEL] Accuracy treino: {checkpoint['best_accuracy']:.2f}%")
+            
+        except Exception as e:
+            print(f"[MODEL] ❌ Erro ao carregar modelo: {e}")
+            raise
+    
+    def get_model_info(self):
+        """Retorna informações do modelo."""
         return {
-            'predicted_class': predicted_class_real,
-            'class_name': f"Classe {predicted_class_real}",
-            'confidence': confidence,
-            'all_probabilities': all_probabilities,
-            'valid': True,
-            'null_proportion': null_proportion
+            'input_size': self.model_info['input_size'],
+            'output_size': self.model_info['output_size'],
+            'feature_names': self.feature_names,
+            'device': self.device,
+            'preprocessing': self.model_info.get('preprocessing_details', {}),
+            'best_accuracy': self.model_info.get('best_accuracy', 'N/A')
         }
 
-# =============== CONFIGURAÇÃO DO SISTEMA ===============
-class PoseCaptureConfig:
-    """Configurações do sistema de captura."""
-    
-    # Definições da câmara
-    CAMERA_WIDTH = 640
-    CAMERA_HEIGHT = 480
-    CAMERA_FPS = 60
-    
-    # Número de landmarks por tipo
-    NUM_POSE_LANDMARKS = 33
-    NUM_HAND_LANDMARKS = 21
-    NUM_FACE_LANDMARKS = 468
-    
-    # Configurações do MediaPipe
-    MIN_DETECTION_CONFIDENCE = 0.5
-    MIN_TRACKING_CONFIDENCE = 0.5
-    MODEL_COMPLEXITY = 0  # 0 = mais rápido, 2 = mais preciso
-    
-    # Valor padrão para landmarks não detectadas
-    DEFAULT_LANDMARK_VALUE = 0.0
 
-# =============== PROCESSADOR DE LANDMARKS ===============
-class LandmarkProcessor:
-    """Processador de landmarks do MediaPipe."""
+# ===========================================================================================
+# PROCESSADOR DE LANDMARKS PARA PREDIÇÃO
+# ===========================================================================================
+
+class LandmarkPreprocessor:
+    """Processa landmarks do MediaPipe para formato de predição."""
     
     @staticmethod
-    def extract_features_for_model(results, feature_config: Dict, debug: bool = False) -> List[float]:
-        """
-        Extrai todas as features necessárias para o modelo (1629 features).
-        
-        NOTA: Features de visibilidade (Face, Pose, RightHand, LeftHand) foram REMOVIDAS
-        conforme o modelo treinado.
-        
-        Ordem das features:
-        1. Landmarks da pose: 33 pontos × 3 coordenadas = 99 valores
-        2. Landmarks da mão esquerda: 21 pontos × 3 coordenadas = 63 valores
-        3. Landmarks da mão direita: 21 pontos × 3 coordenadas = 63 valores
-        4. Landmarks da face: 468 pontos × 3 coordenadas = 1404 valores
-        
-        Total: 99 + 63 + 63 + 1404 = 1629 features (apenas coordenadas)
-        """
-        features = []
-        
-        if debug:
-            print("\n=== DEBUG: Extração de Features ===")
-            print("NOTA: Modelo treinado SEM features de visibilidade (apenas coordenadas)")
-        
-        # ========== LANDMARKS DA POSE (99 features) ==========
-        pose_start = len(features)
-        if results.pose_landmarks:
-            landmarks_to_use = list(results.pose_landmarks.landmark)[:PoseCaptureConfig.NUM_POSE_LANDMARKS]
-            
-            if debug:
-                # Debug: imprimir primeiros 3 landmarks da pose
-                for i, landmark in enumerate(landmarks_to_use[:3]):
-                    print(f"  Pose Landmark {i}: x={landmark.x:.3f}, y={landmark.y:.3f}, z={landmark.z:.3f}")
-            
-            for landmark in landmarks_to_use:
-                features.extend([landmark.x, landmark.y, landmark.z])
-            remaining = PoseCaptureConfig.NUM_POSE_LANDMARKS - len(landmarks_to_use)
-            if remaining > 0:
-                features.extend([PoseCaptureConfig.DEFAULT_LANDMARK_VALUE] * (remaining * 3))
+    def extract_coordinates(landmarks, expected_count: int) -> List[float]:
+        """Extrai coordenadas x,y,z de landmarks."""
+        if landmarks:
+            return [coord for lm in landmarks for coord in (lm.x, lm.y, lm.z)]
         else:
-            features.extend([PoseCaptureConfig.DEFAULT_LANDMARK_VALUE] *  (PoseCaptureConfig.NUM_POSE_LANDMARKS * 3))
-        
-        if debug:
-            print(f"Features da Pose (índices {pose_start}-{len(features)-1}): {len(features)-pose_start} valores")
-        
-        # ========== LANDMARKS DA MÃO ESQUERDA (63 features) ==========
-        lh_start = len(features)
-        if results.left_hand_landmarks:
-            landmarks_to_use = list(results.left_hand_landmarks.landmark)[:PoseCaptureConfig.NUM_HAND_LANDMARKS]
-            
-            if debug and landmarks_to_use:
-                print(f"  Mão Esq. Landmark 0: x={landmarks_to_use[0].x:.3f}, y={landmarks_to_use[0].y:.3f}, z={landmarks_to_use[0].z:.3f}")
-            
-            for landmark in landmarks_to_use:
-                features.extend([landmark.x, landmark.y, landmark.z])
-            remaining = PoseCaptureConfig.NUM_HAND_LANDMARKS - len(landmarks_to_use)
-            if remaining > 0:
-                features.extend([500.0] * (remaining * 3))
-        else:
-            features.extend([500.0] * (PoseCaptureConfig.NUM_HAND_LANDMARKS * 3))
-        
-        if debug:
-            print(f"Features Mão Esq. (índices {lh_start}-{len(features)-1}): {len(features)-lh_start} valores")
-        
-        # ========== LANDMARKS DA MÃO DIREITA (63 features) ==========
-        rh_start = len(features)
-        if results.right_hand_landmarks:
-            landmarks_to_use = list(results.right_hand_landmarks.landmark)[:PoseCaptureConfig.NUM_HAND_LANDMARKS]
-            
-            if debug and landmarks_to_use:
-                print(f"  Mão Dir. Landmark 0: x={landmarks_to_use[0].x:.3f}, y={landmarks_to_use[0].y:.3f}, z={landmarks_to_use[0].z:.3f}")
-            
-            for landmark in landmarks_to_use:
-                features.extend([landmark.x, landmark.y, landmark.z])
-            remaining = PoseCaptureConfig.NUM_HAND_LANDMARKS - len(landmarks_to_use)
-            if remaining > 0:
-                features.extend([500.0] * (remaining * 3))
-        else:
-            features.extend([500.0] * (PoseCaptureConfig.NUM_HAND_LANDMARKS * 3))
-        
-        if debug:
-            print(f"Features Mão Dir. (índices {rh_start}-{len(features)-1}): {len(features)-rh_start} valores")
-        
-        # ========== LANDMARKS DA FACE (1404 features) ==========
-        face_start = len(features)
-        if results.face_landmarks:
-            landmarks_to_use = list(results.face_landmarks.landmark)[:PoseCaptureConfig.NUM_FACE_LANDMARKS]
-            
-            if debug and landmarks_to_use:
-                print(f"  Face Landmark 0: x={landmarks_to_use[0].x:.3f}, y={landmarks_to_use[0].y:.3f}, z={landmarks_to_use[0].z:.3f}")
-            
-            for landmark in landmarks_to_use:
-                features.extend([landmark.x, landmark.y, landmark.z])
-            remaining = PoseCaptureConfig.NUM_FACE_LANDMARKS - len(landmarks_to_use)
-            if remaining > 0:
-                features.extend([500.0] * (remaining * 3))
-            
-            actual_count = len(results.face_landmarks.landmark)
-            if actual_count != PoseCaptureConfig.NUM_FACE_LANDMARKS:
-                print(f"AVISO: Face tem {actual_count} landmarks, esperado {PoseCaptureConfig.NUM_FACE_LANDMARKS}")
-        
-        else:
-            features.extend([500.0] * (PoseCaptureConfig.NUM_FACE_LANDMARKS * 3))
-        
-        if debug:
-            print(f"Features Face (índices {face_start}-{len(features)-1}): {len(features)-face_start} valores")
-            print(f"\nTotal de features extraídas: {len(features)}")
-            print(f"Primeiras 10 features: {features[:10]}")
-            print(f"Últimas 10 features: {features[-10:]}")
-            
-            # Verificar valores especiais
-            num_zeros = features.count(0)
-            num_default = features.count(500.0)
-            num_ones = features.count(1)
-            print(f"Valores especiais: {num_zeros} zeros, {num_ones} uns, {num_default} valores 500.0")
-            
-            # Estatísticas das coordenadas válidas
-            valid_coords = [f for f in features if f != 500.0]
-            if valid_coords:
-                print(f"Coordenadas válidas: {len(valid_coords)}, Min={min(valid_coords):.3f}, Max={max(valid_coords):.3f}")
-        
-        # Verificar que temos exatamente 1629 features (sem as 4 de visibilidade)
-        EXPECTED_FEATURES = 1629
-        if len(features) != EXPECTED_FEATURES:
-            raise ValueError(f"Número de features incorreto: {len(features)} (esperado: {EXPECTED_FEATURES})")
-        
-        return features
-
-# =============== SISTEMA DE CAPTURA COM PREDIÇÃO ===============
-class VideoCaptureWithPrediction:
-    """Sistema de captura com predição em tempo real."""
+            return [PredictionConfig.DEFAULT_LANDMARK_VALUE] * (expected_count * 3)
     
-    def __init__(self, model_path: str, show_visualization: bool = True, target_fps: float = 30.0,
-                 null_threshold: float = 0.95, confidence_threshold: float = 0.3):
-        """
-        Inicializa o sistema de captura com modelo.
+    @staticmethod
+    def create_feature_vector(results) -> np.ndarray:
+        """Cria vetor de features a partir dos resultados do MediaPipe."""
         
-        Args:
-            model_path: Caminho para o modelo treinado
-            scaler_path: Caminho para o StandardScaler do treino
-            imputer_path: Caminho para o SimpleImputer do treino
-            show_visualization: Se deve mostrar visualização
-            target_fps: FPS desejado
-            null_threshold: Proporção de features 500.0 para considerar amostra inválida
-            confidence_threshold: Threshold mínimo de confiança para fazer predição
-        """
-        self.show_visualization = show_visualization
-        self.target_fps = target_fps
-        self.frame_interval = 1.0 / target_fps
-        
-        # Inicializar MediaPipe
-        self.mp_holistic = mp.solutions.holistic
-        self.mp_drawing = mp.solutions.drawing_utils
-        self.mp_drawing_styles = mp.solutions.drawing_styles
-        
-        # Carregar modelo de predição com preprocessadores
-        self.predictor = ModelPredictor(
-            model_path, #scaler_path, imputer_path,
-            null_threshold=null_threshold,
-            confidence_threshold=confidence_threshold
+        # Extrair coordenadas (mesma ordem que no treino)
+        pose_coords = LandmarkPreprocessor.extract_coordinates(
+            results.pose_landmarks.landmark if results.pose_landmarks else None,
+            PredictionConfig.NUM_POSE_LANDMARKS
         )
         
-        # Inicializar webcam
+        left_hand_coords = LandmarkPreprocessor.extract_coordinates(
+            results.left_hand_landmarks.landmark if results.left_hand_landmarks else None,
+            PredictionConfig.NUM_HAND_LANDMARKS
+        )
+        
+        right_hand_coords = LandmarkPreprocessor.extract_coordinates(
+            results.right_hand_landmarks.landmark if results.right_hand_landmarks else None,
+            PredictionConfig.NUM_HAND_LANDMARKS
+        )
+        
+        face_coords = LandmarkPreprocessor.extract_coordinates(
+            results.face_landmarks.landmark if results.face_landmarks else None,
+            PredictionConfig.NUM_FACE_LANDMARKS
+        )
+        
+        # Combinar todas as coordenadas (mesma ordem que no treino)
+        feature_vector = pose_coords + left_hand_coords + right_hand_coords + face_coords
+        
+        return np.array(feature_vector, dtype=np.float32)
+    
+    @staticmethod
+    def get_detection_status(results) -> Dict[str, bool]:
+        """Obtém status de detecção de landmarks."""
+        return {
+            "face": results.face_landmarks is not None,
+            "pose": results.pose_landmarks is not None,
+            "left_hand": results.left_hand_landmarks is not None,
+            "right_hand": results.right_hand_landmarks is not None
+        }
+
+
+# ===========================================================================================
+# SUAVIZAÇÃO DE PREDIÇÕES
+# ===========================================================================================
+
+class PredictionSmoother:
+    """Classe para suavizar predições ao longo do tempo."""
+    
+    def __init__(self, window_size: int = 5):
+        self.window_size = window_size
+        self.prediction_history = []
+        self.confidence_history = []
+    
+    def add_prediction(self, prediction: int, confidence: float):
+        """Adiciona nova predição ao histórico."""
+        self.prediction_history.append(prediction)
+        self.confidence_history.append(confidence)
+        
+        # Manter apenas as últimas N predições
+        if len(self.prediction_history) > self.window_size:
+            self.prediction_history.pop(0)
+            self.confidence_history.pop(0)
+    
+    def get_smoothed_prediction(self) -> Tuple[int, float]:
+        """Retorna predição suavizada baseada no histórico."""
+        if not self.prediction_history:
+            return -1, 0.0
+        
+        # Usar moda para predição (mais frequente)
+        unique_predictions, counts = np.unique(self.prediction_history, return_counts=True)
+        most_common_idx = np.argmax(counts)
+        smoothed_prediction = unique_predictions[most_common_idx]
+        
+        # Média das confianças para essa predição
+        matching_confidences = [conf for pred, conf in zip(self.prediction_history, self.confidence_history) 
+                               if pred == smoothed_prediction]
+        smoothed_confidence = np.mean(matching_confidences) if matching_confidences else 0.0
+        
+        return int(smoothed_prediction), float(smoothed_confidence)
+    
+    def get_stability_score(self) -> float:
+        """Retorna score de estabilidade das predições (0-1)."""
+        if len(self.prediction_history) < 2:
+            return 0.0
+        
+        # Calcular quantas predições são iguais à mais recente
+        recent_prediction = self.prediction_history[-1]
+        matches = sum(1 for pred in self.prediction_history if pred == recent_prediction)
+        
+        return matches / len(self.prediction_history)
+
+
+# ===========================================================================================
+# VISUALIZADOR PARA PREDIÇÕES
+# ===========================================================================================
+
+class PredictionVisualizer:
+    """Classe para visualizar predições e informações na tela."""
+    
+    @staticmethod
+    def draw_landmarks(image: np.ndarray, results):
+        """Desenha landmarks como quadrados brancos."""
+        h, w = image.shape[:2]
+        
+        # Landmarks do rosto (pequenos)
+        if results.face_landmarks:
+            for landmark in results.face_landmarks.landmark:
+                x, y = int(landmark.x * w), int(landmark.y * h)
+                cv2.rectangle(image, 
+                            (x - PredictionConfig.FACE_SQUARE_SIZE, y - PredictionConfig.FACE_SQUARE_SIZE),
+                            (x + PredictionConfig.FACE_SQUARE_SIZE, y + PredictionConfig.FACE_SQUARE_SIZE),
+                            PredictionConfig.SQUARE_COLOR, -1)
+        
+        # Landmarks da pose, mãos (normais)
+        for landmarks in [results.pose_landmarks, results.left_hand_landmarks, results.right_hand_landmarks]:
+            if landmarks:
+                for landmark in landmarks.landmark:
+                    x, y = int(landmark.x * w), int(landmark.y * h)
+                    cv2.rectangle(image,
+                                (x - PredictionConfig.SQUARE_SIZE, y - PredictionConfig.SQUARE_SIZE),
+                                (x + PredictionConfig.SQUARE_SIZE, y + PredictionConfig.SQUARE_SIZE),
+                                PredictionConfig.SQUARE_COLOR, -1)
+    
+    @staticmethod
+    def add_prediction_overlay(image: np.ndarray, prediction: int, confidence: float, 
+                             smoothed_prediction: int, smoothed_confidence: float,
+                             stability: float, fps: float, detection_status: Dict[str, bool]):
+        """Adiciona overlay com informações de predição."""
+        h, w = image.shape[:2]
+        
+        # Cor baseada na confiança
+        if smoothed_confidence > 0.7:
+            confidence_color = (0, 255, 0)  # Verde
+        elif smoothed_confidence > 0.4:
+            confidence_color = (0, 255, 255)  # Amarelo
+        else:
+            confidence_color = (0, 0, 255)  # Vermelho
+        
+        # Criar overlay escuro para melhor legibilidade
+        overlay = image.copy()
+        cv2.rectangle(overlay, (0, 0), (w, 120), (0, 0, 0), -1)
+        cv2.addWeighted(overlay, 0.7, image, 0.3, 0, image)
+        
+        # Predição principal (grande)
+        main_text = f"Animacao: {smoothed_prediction + 1}"  # +1 para display (1-4 em vez de 0-3)
+        cv2.putText(image, main_text, (20, 40), cv2.FONT_HERSHEY_DUPLEX, 1.2, confidence_color, 2)
+        
+        # Confiança
+        conf_text = f"Confianca: {smoothed_confidence:.2f}"
+        cv2.putText(image, conf_text, (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.6, confidence_color, 2)
+        
+        # Estabilidade
+        stability_text = f"Estabilidade: {stability:.2f}"
+        cv2.putText(image, stability_text, (20, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+        
+        # Status de detecção (canto superior direito)
+        status_x = w - 200
+        cv2.putText(image, "Deteccao:", (status_x, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        
+        status_symbols = []
+        if detection_status["face"]: status_symbols.append("F")
+        if detection_status["pose"]: status_symbols.append("P")
+        if detection_status["left_hand"]: status_symbols.append("LH")
+        if detection_status["right_hand"]: status_symbols.append("RH")
+        
+        status_text = " ".join(status_symbols) if status_symbols else "NENHUMA"
+        status_color = (0, 255, 0) if len(status_symbols) >= 2 else (0, 255, 255) if status_symbols else (0, 0, 255)
+        cv2.putText(image, status_text, (status_x, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, status_color, 1)
+        
+        # FPS (canto inferior direito)
+        fps_text = f"FPS: {fps:.1f}"
+        cv2.putText(image, fps_text, (w - 100, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        
+        # Debug info (se ativado)
+        if PredictionConfig.SHOW_DEBUG_INFO:
+            debug_text = f"Raw: {prediction + 1} ({confidence:.2f})"  # +1 para display
+            cv2.putText(image, debug_text, (20, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (150, 150, 150), 1)
+
+
+# ===========================================================================================
+# SISTEMA PRINCIPAL DE PREDIÇÃO
+# ===========================================================================================
+
+class RealtimePredictionSystem:
+    """Sistema principal de predições em tempo real."""
+    
+    def __init__(self, model_path: str):
+        print("🎯 Inicializando Sistema de Predições em Tempo Real")
+        print("=" * 60)
+        
+        # Carregar modelo
+        self.model_loader = ModelLoader(model_path)
+        self.model = self.model_loader.model
+        self.device = self.model_loader.device
+        
+        # Componentes do sistema
+        self.preprocessor = LandmarkPreprocessor()
+        self.smoother = PredictionSmoother(window_size=PredictionConfig.SMOOTHING_WINDOW)
+        self.visualizer = PredictionVisualizer()
+        
+        # MediaPipe
+        self.mp_holistic = mp.solutions.holistic
+        
+        # Câmara
         self.cap = self._setup_camera()
         
-        # Histórico de predições (para análise posterior)
-        self.prediction_history = []
+        # Estatísticas
+        self.frame_count = 0
+        self.start_time = time.time()
+        self.last_fps_update = 0
+        self.current_fps = 0
         
-        # Contadores para estatísticas
-        self.stats = {
-            'total_frames': 0,
-            'valid_predictions': 0,
-            'invalid_too_many_nulls': 0,
-            'invalid_low_confidence': 0,
-            'class_counts': {i: 0 for i in range(1, 5)}  # Classes 1-4
-        }
-        
-        print("Sistema inicializado com modelo de predição (Classes 1-4)!")
-        #if scaler_path and imputer_path:
-            #print("✓ Preprocessamento configurado corretamente com Scaler e Imputer do treino")
-        #else:
-            #print("⚠️ AVISO: Sem Scaler/Imputer - resultados podem ser incorretos!")
+        self._print_initialization_summary()
     
     def _setup_camera(self) -> cv2.VideoCapture:
-        """Configura a webcam."""
+        """Configura webcam."""
         cap = cv2.VideoCapture(0)
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, PoseCaptureConfig.CAMERA_WIDTH)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, PoseCaptureConfig.CAMERA_HEIGHT)
-        cap.set(cv2.CAP_PROP_FPS, PoseCaptureConfig.CAMERA_FPS)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, PredictionConfig.CAMERA_WIDTH)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, PredictionConfig.CAMERA_HEIGHT)
+        cap.set(cv2.CAP_PROP_FPS, PredictionConfig.CAMERA_FPS)
         
         if not cap.isOpened():
             raise RuntimeError("Erro: Não foi possível aceder à webcam!")
         
         return cap
     
-    def _draw_landmarks(self, image, results):
-        """Desenha todas as landmarks na imagem (face, pose e mãos)."""
-        # Desenhar malha facial
-        if results.face_landmarks:
-            self.mp_drawing.draw_landmarks(
-                image, results.face_landmarks, 
-                self.mp_holistic.FACEMESH_TESSELATION,
-                None, 
-                self.mp_drawing_styles.get_default_face_mesh_tesselation_style()
-            )
+    def _print_initialization_summary(self):
+        """Imprime resumo da inicialização."""
+        model_info = self.model_loader.get_model_info()
         
-        # Desenhar pose corporal
-        if results.pose_landmarks:
-            self.mp_drawing.draw_landmarks(
-                image, results.pose_landmarks, 
-                self.mp_holistic.POSE_CONNECTIONS,
-                self.mp_drawing_styles.get_default_pose_landmarks_style()
-            )
-        
-        # Desenhar mão esquerda
-        if results.left_hand_landmarks:
-            self.mp_drawing.draw_landmarks(
-                image, results.left_hand_landmarks, 
-                self.mp_holistic.HAND_CONNECTIONS,
-                self.mp_drawing_styles.get_default_hand_landmarks_style()
-            )
-        
-        # Desenhar mão direita
-        if results.right_hand_landmarks:
-            self.mp_drawing.draw_landmarks(
-                image, results.right_hand_landmarks, 
-                self.mp_holistic.HAND_CONNECTIONS,
-                self.mp_drawing_styles.get_default_hand_landmarks_style()
-            )
+        print(f"[INIT] ✅ Sistema inicializado com sucesso!")
+        print(f"[INIT] Modelo: {model_info['input_size']} → {model_info['output_size']} classes")
+        print(f"[INIT] Device: {model_info['device']}")
+        print(f"[INIT] Accuracy treino: {model_info['best_accuracy']}")
+        print(f"[INIT] Suavização: janela de {PredictionConfig.SMOOTHING_WINDOW} frames")
+        print(f"[INIT] Limiar confiança: {PredictionConfig.CONFIDENCE_THRESHOLD}")
     
-    def _add_prediction_overlay(self, image, prediction: Dict, results):
-        """
-        Adiciona informação da predição na imagem.
-        
-        Args:
-            image: Imagem onde adicionar o texto
-            prediction: Resultado da predição do modelo
-            results: Resultados do MediaPipe para mostrar estado de detecção
-        """
-        # Verificar se é uma predição válida
-        if 'error' in prediction:
-            # Mostrar erro se houver
-            cv2.putText(
-                image, f"Erro: {prediction['error']}", 
-                (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2
-            )
-        elif not prediction.get('valid', False):
-            # Mostrar razão da não-predição
-            reason = prediction.get('reason', 'unknown')
-            null_pct = prediction.get('null_proportion', 0) * 100
-            
-            cv2.putText(
-                image, "SEM PREDICAO", 
-                (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 165, 255), 2
-            )
-            
-            if reason == 'too_many_nulls':
-                cv2.putText(
-                    image, f"Muitos valores ausentes ({null_pct:.0f}%)", 
-                    (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 1
-                )
-            elif reason == 'low_confidence':
-                confidence = prediction.get('confidence', 0) * 100
-                best_guess = prediction.get('best_guess', '?')
-                cv2.putText(
-                    image, f"Confianca baixa: {confidence:.1f}%", 
-                    (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 1
-                )
-                cv2.putText(
-                    image, f"(Melhor palpite: Classe {best_guess})", 
-                    (10, 85), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (128, 128, 128), 1
-                )
-        else:
-            # Mostrar classe predita e confiança (CLASSES 1-4)
-            class_name = prediction['class_name']
-            predicted_class = prediction['predicted_class']
-            confidence = prediction['confidence'] * 100  # Converter para percentagem
-            null_pct = prediction.get('null_proportion', 0) * 100
-            
-            # Cor baseada na confiança
-            if confidence > 80:
-                color = (0, 255, 0)  # Verde
-            elif confidence > 60:
-                color = (0, 255, 255)  # Amarelo
-            else:
-                color = (0, 165, 255)  # Laranja
-            
-            # Texto principal com a predição
-            cv2.putText(
-                image, f"CLASSE {predicted_class}", 
-                (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1.0, color, 3
-            )
-            cv2.putText(
-                image, f"Confianca: {confidence:.1f}%", 
-                (10, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2
-            )
-            
-            # Mostrar barra de confiança
-            bar_width = int(confidence * 2)  # Largura máxima 200 pixels
-            cv2.rectangle(image, (10, 85), (10 + bar_width, 105), color, -1)
-            cv2.rectangle(image, (10, 85), (210, 105), (255, 255, 255), 2)
-            
-            # Mostrar percentagem de valores ausentes
-            cv2.putText(
-                image, f"Valores ausentes: {null_pct:.0f}%", 
-                (10, 125), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1
-            )
-        
-        # Mostrar estado de detecção dos componentes
-        y_pos = 155
-        detections = [
-            ("Face", results.face_landmarks is not None),
-            ("Pose", results.pose_landmarks is not None),
-            ("Mao Esq", results.left_hand_landmarks is not None),
-            ("Mao Dir", results.right_hand_landmarks is not None)
-        ]
-        
-        for name, detected in detections:
-            color = (0, 255, 0) if detected else (0, 0, 255)
-            status = "OK" if detected else "X"
-            cv2.putText(
-                image, f"{name}: {status}", 
-                (10, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1
-            )
-            y_pos += 25
-        
-        # Adicionar nota sobre preprocessamento
-        """if self.predictor.scaler is not None:
-            cv2.putText(
-                image, "Preprocessamento: OK", 
-                (10, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1
-            )
-        else:
-            cv2.putText(
-                image, "Preprocessamento: BASICO", 
-                (10, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 165, 255), 1
-            )"""
-        cv2.putText(image, "Preprocessamento: Basico (0.0)", (10, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1)
-
-        
-        # Mostrar estatísticas no canto superior direito
-        stats_x = image.shape[1] - 200
-        cv2.putText(
-            image, "ESTATISTICAS", 
-            (stats_x, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1
-        )
-        cv2.putText(
-            image, f"Frames: {self.stats['total_frames']}", 
-            (stats_x, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1
-        )
-        cv2.putText(
-            image, f"Validas: {self.stats['valid_predictions']}", 
-            (stats_x, 55), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1
-        )
-        cv2.putText(
-            image, f"Rejeitadas: {self.stats['invalid_too_many_nulls'] + self.stats['invalid_low_confidence']}", 
-            (stats_x, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1
-        )
+    def _update_fps(self):
+        """Atualiza cálculo de FPS."""
+        if self.frame_count % PredictionConfig.FPS_UPDATE_INTERVAL == 0:
+            current_time = time.time()
+            if self.last_fps_update > 0:
+                time_diff = current_time - self.last_fps_update
+                self.current_fps = PredictionConfig.FPS_UPDATE_INTERVAL / time_diff
+            self.last_fps_update = current_time
     
-    def check_data_consistency(self, features_list: List[List[float]]):
-        """Verifica a consistência dos dados ao longo do tempo."""
-        if len(features_list) < 2:
-            return
+    def run(self):
+        """Executa sistema de predições em tempo real."""
+        print(f"\n[PREDICTION] 🎬 Iniciando predições em tempo real")
+        print("[PREDICTION] Pressione 'q' para sair, 's' para capturar screenshot")
         
-        print("\n=== DEBUG: Consistência dos Dados ===")
+        cv2.namedWindow('Predicoes em Tempo Real', cv2.WINDOW_NORMAL)
+        cv2.resizeWindow('Predicoes em Tempo Real', PredictionConfig.CAMERA_WIDTH, PredictionConfig.CAMERA_HEIGHT)
         
-        # Comparar features consecutivas
-        prev_features = np.array(features_list[-2])
-        curr_features = np.array(features_list[-1])
-        
-        # Calcular diferença
-        diff = np.abs(curr_features - prev_features)
-        max_diff_idx = np.argmax(diff)
-        
-        print(f"Maior mudança: índice {max_diff_idx}, valor {diff[max_diff_idx]:.3f}")
-        print(f"Mudanças > 0.1: {np.sum(diff > 0.1)} features")
-        print(f"Mudanças > 0.5: {np.sum(diff > 0.5)} features")
-        
-        # Analisar estabilidade das coordenadas
-        valid_mask = (prev_features != 500.0) & (curr_features != 500.0)
-        if np.any(valid_mask):
-            valid_diffs = diff[valid_mask]
-            print(f"\nEstabilidade das coordenadas válidas:")
-            print(f"  Média de mudança: {np.mean(valid_diffs):.4f}")
-            print(f"  Máxima mudança: {np.max(valid_diffs):.4f}")
-            print(f"  Desvio padrão: {np.std(valid_diffs):.4f}")
-        
-        # Verificar mudanças nos valores 500
-        prev_500_count = (prev_features == 500.0).sum()
-        curr_500_count = (curr_features == 500.0).sum()
-        if prev_500_count != curr_500_count:
-            print(f"\nMUDANÇA no número de valores 500.0: {prev_500_count} -> {curr_500_count}")
-    
-    def capture(self, debug_mode=True):
-        """Executa o processo de captura com predição em tempo real."""
-        start_time = time.time()
-        last_frame_time = 0
-        frame_count = 0
-        features_history = []  # Para análise de consistência
-        
-        print("A iniciar captura com predição em tempo real (MODELO 1-4).")
-        print("Pressione 'q' para parar.")
-        if debug_mode:
-            print("\nMODO DEBUG ATIVADO:")
-            print("  - Pressione 'd' para debug detalhado do frame atual")
-            print("  - Pressione 'f' para debug completo das features")
-            print("  - Pressione 'p' para debug da predição")
-            print("  - Pressione 'c' para verificar consistência dos dados")
-            print("  - Pressione 's' para mostrar estatísticas detalhadas")
-        
-        print(f"\nCONFIGURAÇÕES DO MODELO:")
-        print(f"  - Classes de saída: 1-4")
-        print(f"  - Threshold de valores nulos: {self.predictor.null_threshold*100:.0f}%")
-        print(f"  - Threshold de confiança: {self.predictor.confidence_threshold*100:.0f}%")
-        
-        with self.mp_holistic.Holistic(
-            min_detection_confidence=PoseCaptureConfig.MIN_DETECTION_CONFIDENCE,
-            min_tracking_confidence=PoseCaptureConfig.MIN_TRACKING_CONFIDENCE,
-            refine_face_landmarks=False,  # Ativar landmarks da face
-            model_complexity=PoseCaptureConfig.MODEL_COMPLEXITY
-        ) as holistic:
-            
-            while self.cap.isOpened():
-                current_time = time.time()
+        try:
+            with self.mp_holistic.Holistic(
+                min_detection_confidence=PredictionConfig.MIN_DETECTION_CONFIDENCE,
+                min_tracking_confidence=PredictionConfig.MIN_TRACKING_CONFIDENCE,
+                refine_face_landmarks=False,
+                model_complexity=PredictionConfig.MODEL_COMPLEXITY
+            ) as holistic:
                 
-                # Controlo de FPS
-                if current_time - last_frame_time < self.frame_interval:
-                    continue
-                
-                success, image = self.cap.read()
-                if not success:
-                    continue
-                
-                frame_count += 1
-                self.stats['total_frames'] += 1
-                
-                # Processar imagem com MediaPipe
-                image.flags.writeable = False
-                image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-                results = holistic.process(image_rgb)
-                
-                # ========== PREDIÇÃO DO MODELO ==========
-                # Extrair features para o modelo
-                features = LandmarkProcessor.extract_features_for_model(results, {}, debug=False)
-                
-                # Debug limitado (a cada 30 frames)
-                if debug_mode and frame_count % 30 == 0:
-                    print(f"\n--- Frame {frame_count} ---")
-                    print(f"Features shape: {len(features)}")
-                    # Contar valores 500.0
-                    num_500s = features.count(500.0)
-                    print(f"Valores 500.0: {num_500s} ({num_500s/len(features)*100:.1f}%)")
-                    # Mostrar resumo das detecções
-                    detections = []
-                    if results.face_landmarks: detections.append("Face")
-                    if results.pose_landmarks: detections.append("Pose")
-                    if results.right_hand_landmarks: detections.append("MãoDir")
-                    if results.left_hand_landmarks: detections.append("MãoEsq")
-                    print(f"Detecções ativas: {', '.join(detections) if detections else 'Nenhuma'}")
-                
-                # Guardar para análise de consistência
-                features_history.append(features)
-                if len(features_history) > 10:
-                    features_history.pop(0)
-                
-                # Fazer predição
-                prediction = self.predictor.predict(features, debug=False)
-                
-                # Atualizar estatísticas
-                if prediction.get('valid', False):
-                    self.stats['valid_predictions'] += 1
-                    pred_class = prediction['predicted_class']
-                    if pred_class in self.stats['class_counts']:
-                        self.stats['class_counts'][pred_class] += 1
-                else:
-                    reason = prediction.get('reason', 'unknown')
-                    if reason == 'too_many_nulls':
-                        self.stats['invalid_too_many_nulls'] += 1
-                    elif reason == 'low_confidence':
-                        self.stats['invalid_low_confidence'] += 1
-                
-                # Guardar no histórico com timestamp
-                self.prediction_history.append({
-                    'timestamp': current_time,
-                    'prediction': prediction,
-                    'num_500s': features.count(500.0)
-                })
-                
-                # ========== VISUALIZAÇÃO ==========
-                image.flags.writeable = True
-                image = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
-                
-                if self.show_visualization:
+                while self.cap.isOpened():
+                    success, image = self.cap.read()
+                    if not success:
+                        continue
+                    
+                    self.frame_count += 1
+                    self._update_fps()
+                    
+                    # Processar MediaPipe
+                    image.flags.writeable = False
+                    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+                    results = holistic.process(image_rgb)
+                    
+                    # Obter status de detecção
+                    detection_status = self.preprocessor.get_detection_status(results)
+                    
+                    # Fazer predição
+                    prediction, confidence = self._make_prediction(results)
+                    
+                    # Adicionar à suavização
+                    if prediction >= 0:  # Predição válida
+                        self.smoother.add_prediction(prediction, confidence)
+                    
+                    # Obter predição suavizada
+                    smoothed_pred, smoothed_conf = self.smoother.get_smoothed_prediction()
+                    stability = self.smoother.get_stability_score()
+                    
+                    # Visualização
+                    image.flags.writeable = True
+                    image = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
+                    
                     # Desenhar landmarks
-                    self._draw_landmarks(image, results)
+                    self.visualizer.draw_landmarks(image, results)
                     
-                    # Adicionar informação da predição
-                    self._add_prediction_overlay(image, prediction, results)
+                    # Adicionar overlay de predição
+                    display_pred = prediction if prediction >= 0 else -1
+                    display_smoothed = smoothed_pred if smoothed_pred >= 0 else -1
                     
-                    # Mostrar tempo decorrido
-                    elapsed = int(current_time - start_time)
-                    minutes = elapsed // 60
-                    seconds = elapsed % 60
-                    cv2.putText(
-                        image, f"Tempo: {minutes:02d}:{seconds:02d}", 
-                        (10, 320), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1
+                    self.visualizer.add_prediction_overlay(
+                        image, display_pred, confidence,
+                        display_smoothed, smoothed_conf, stability,
+                        self.current_fps, detection_status
                     )
                     
-                    # Mostrar imagem
-                    cv2.imshow('Pose com Predicao em Tempo Real (Classes 1-4)', image)
-                
-                last_frame_time = current_time
-                
-                # Verificar teclas pressionadas
-                key = cv2.waitKey(1) & 0xFF
-                
-                if key == ord('q'):
-                    break
-                elif key == ord('d') and debug_mode:
-                    # Debug detalhado quando 'd' é pressionado
-                    print("\n" + "="*80)
-                    print("DEBUG DETALHADO DO FRAME ATUAL")
-                    print("="*80)
-                    print(f"Frame: {frame_count}")
-                    print(f"Tempo: {current_time - start_time:.2f}s")
-                    self.check_data_consistency(features_history)
-                    print("="*80)
-                elif key == ord('f') and debug_mode:
-                    # Debug completo das features
-                    print("\n" + "="*80)
-                    print("DEBUG COMPLETO DAS FEATURES")
-                    print("="*80)
-                    _ = LandmarkProcessor.extract_features_for_model(results, {}, debug=True)
-                    print("="*80)
-                elif key == ord('p') and debug_mode:
-                    # Debug da predição
-                    print("\n" + "="*80)
-                    print("DEBUG DA PREDIÇÃO")
-                    print("="*80)
-                    _ = self.predictor.predict(features, debug=True)
-                    print("="*80)
-                elif key == ord('c') and debug_mode:
-                    # Verificar consistência
-                    print("\n" + "="*80)
-                    print("ANÁLISE DE CONSISTÊNCIA")
-                    print("="*80)
-                    if len(self.prediction_history) > 10:
-                        # Analisar últimas 10 predições
-                        recent_predictions = self.prediction_history[-10:]
-                        
-                        # Apenas predições válidas
-                        valid_predictions = [p for p in recent_predictions if p['prediction'].get('valid', False)]
-                        if valid_predictions:
-                            classes = [p['prediction']['predicted_class'] for p in valid_predictions]
-                            unique_classes = set(classes)
-                            print(f"Classes únicas nas últimas {len(valid_predictions)} predições VÁLIDAS: {unique_classes}")
-                            for cls in sorted(unique_classes):
-                                count = classes.count(cls)
-                                print(f"  Classe {cls}: {count} vezes ({count/len(classes)*100:.1f}%)")
-                        
-                        # Analisar predições inválidas
-                        invalid_predictions = [p for p in recent_predictions if not p['prediction'].get('valid', False)]
-                        if invalid_predictions:
-                            print(f"\nPredições INVÁLIDAS: {len(invalid_predictions)}")
-                            reasons = [p['prediction'].get('reason', 'unknown') for p in invalid_predictions]
-                            for reason in set(reasons):
-                                count = reasons.count(reason)
-                                print(f"  {reason}: {count} vezes")
-                        
-                        # Verificar variação nos valores 500
-                        num_500s_history = [p['num_500s'] for p in recent_predictions]
-                        print(f"\nVariação de valores 500.0:")
-                        print(f"  Min: {min(num_500s_history)}, Max: {max(num_500s_history)}")
-                        print(f"  Média: {np.mean(num_500s_history):.1f}")
-                        
-                        # Análise de confiança (apenas válidas)
-                        if valid_predictions:
-                            confidences = [p['prediction']['confidence'] for p in valid_predictions]
-                            print(f"\nConfiança das predições VÁLIDAS:")
-                            print(f"  Min: {min(confidences)*100:.1f}%, Max: {max(confidences)*100:.1f}%")
-                            print(f"  Média: {np.mean(confidences)*100:.1f}%")
-                    print("="*80)
-                elif key == ord('s') and debug_mode:
-                    # Mostrar estatísticas detalhadas
-                    print("\n" + "="*80)
-                    print("ESTATÍSTICAS DETALHADAS DA SESSÃO")
-                    print("="*80)
-                    print(f"Total de frames: {self.stats['total_frames']}")
-                    print(f"Predições válidas: {self.stats['valid_predictions']} ({self.stats['valid_predictions']/self.stats['total_frames']*100:.1f}%)")
-                    print(f"Rejeitadas por muitos nulos: {self.stats['invalid_too_many_nulls']}")
-                    print(f"Rejeitadas por baixa confiança: {self.stats['invalid_low_confidence']}")
+                    # Mostrar frame
+                    cv2.imshow('Predicoes em Tempo Real', image)
                     
-                    print(f"\nDistribuição das classes (apenas predições válidas):")
-                    for cls in range(1, 5):
-                        count = self.stats['class_counts'][cls]
-                        if self.stats['valid_predictions'] > 0:
-                            pct = count / self.stats['valid_predictions'] * 100
-                        else:
-                            pct = 0
-                        print(f"  Classe {cls}: {count} ({pct:.1f}%)")
-                    print("="*80)
+                    # Debug periódico
+                    if self.frame_count % 60 == 0:  # A cada ~2 segundos
+                        self._print_debug_info(detection_status, prediction, confidence, 
+                                             smoothed_pred, smoothed_conf, stability)
+                    
+                    # Verificar teclas
+                    key = cv2.waitKey(1) & 0xFF
+                    if key == ord('q'):
+                        print("[PREDICTION] 🛑 Saindo...")
+                        break
+                    elif key == ord('s'):
+                        self._save_screenshot(image)
         
-        self._cleanup()
+        finally:
+            self._cleanup()
+    
+    def _make_prediction(self, results) -> Tuple[int, float]:
+        """Faz predição baseada nos landmarks detectados."""
+        try:
+            # Extrair features
+            feature_vector = self.preprocessor.create_feature_vector(results)
+            
+            # Verificar se há landmarks suficientes
+            non_zero_features = np.count_nonzero(feature_vector)
+            total_features = len(feature_vector)
+            detection_ratio = non_zero_features / total_features
+            
+            # Se muito poucas detecções, não fazer predição
+            if detection_ratio < 0.1:  # Menos de 10% de landmarks detectados
+                return -1, 0.0
+            
+            # Converter para tensor
+            feature_tensor = torch.tensor(feature_vector, dtype=torch.float32).unsqueeze(0).to(self.device)
+            
+            # Fazer predição
+            predictions, confidences, probs = self.model.predict_with_confidence(feature_tensor)
+            
+            prediction = predictions[0].item()
+            confidence = confidences[0].item()
+            
+            # Aplicar limiar de confiança
+            if confidence < PredictionConfig.CONFIDENCE_THRESHOLD:
+                return -1, confidence
+            
+            return prediction, confidence
+            
+        except Exception as e:
+            print(f"[ERROR] Erro na predição: {e}")
+            return -1, 0.0
+    
+    def _print_debug_info(self, detection_status, prediction, confidence, 
+                         smoothed_pred, smoothed_conf, stability):
+        """Imprime informações de debug."""
+        detected = [k for k, v in detection_status.items() if v]
+        detected_str = "+".join(detected) if detected else "NONE"
+        
+        print(f"[DEBUG] Frame {self.frame_count}: "
+              f"Det={detected_str} | "
+              f"Pred={prediction + 1 if prediction >= 0 else 'N/A'}({confidence:.2f}) | "
+              f"Smooth={smoothed_pred + 1 if smoothed_pred >= 0 else 'N/A'}({smoothed_conf:.2f}) | "
+              f"Stability={stability:.2f} | FPS={self.current_fps:.1f}")
+    
+    def _save_screenshot(self, image):
+        """Salva screenshot com timestamp."""
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        filename = f"prediction_screenshot_{timestamp}.png"
+        cv2.imwrite(filename, image)
+        print(f"[SCREENSHOT] Salvo: {filename}")
     
     def _cleanup(self):
-        """Limpa recursos e mostra resumo."""
+        """Limpa recursos."""
         self.cap.release()
         cv2.destroyAllWindows()
         
-        # Mostrar resumo das predições
-        print("\n" + "="*60)
-        print("RESUMO DA SESSÃO - MODELO CLASSES 1-4")
-        print("="*60)
-        print(f"Total de frames processados: {self.stats['total_frames']}")
-        print(f"Total de predições: {len(self.prediction_history)}")
+        # Estatísticas finais
+        total_time = time.time() - self.start_time
+        avg_fps = self.frame_count / total_time if total_time > 0 else 0
         
-        if self.prediction_history:
-            # Separar predições válidas e inválidas
-            valid_predictions = [p for p in self.prediction_history if p['prediction'].get('valid', False)]
-            invalid_predictions = [p for p in self.prediction_history if not p['prediction'].get('valid', False)]
-            
-            print(f"\nPREDIÇÕES VÁLIDAS: {len(valid_predictions)} ({len(valid_predictions)/len(self.prediction_history)*100:.1f}%)")
-            
-            if valid_predictions:
-                # Contar ocorrências de cada classe
-                class_counts = {}
-                confidence_by_class = {}
-                for item in valid_predictions:
-                    class_name = item['prediction']['class_name']
-                    predicted_class = item['prediction']['predicted_class']
-                    confidence = item['prediction']['confidence']
-                    
-                    class_counts[predicted_class] = class_counts.get(predicted_class, 0) + 1
-                    if predicted_class not in confidence_by_class:
-                        confidence_by_class[predicted_class] = []
-                    confidence_by_class[predicted_class].append(confidence)
-                
-                print("\nDistribuição das classes detectadas:")
-                for pred_class in sorted(class_counts.keys()):
-                    count = class_counts[pred_class]
-                    percentage = (count / len(valid_predictions)) * 100
-                    avg_confidence = np.mean(confidence_by_class[pred_class]) * 100
-                    print(f"  Classe {pred_class}: {count} ({percentage:.1f}%) - Confiança média: {avg_confidence:.1f}%")
-                
-                # Análise de transições entre classes
-                if len(valid_predictions) > 1:
-                    transitions = 0
-                    for i in range(1, len(valid_predictions)):
-                        if valid_predictions[i-1]['prediction']['predicted_class'] != valid_predictions[i]['prediction']['predicted_class']:
-                            transitions += 1
-                    print(f"\nTransições entre classes: {transitions}")
-                    print(f"Estabilidade: {(1 - transitions/len(valid_predictions))*100:.1f}%")
-            
-            print(f"\nPREDIÇÕES INVÁLIDAS: {len(invalid_predictions)} ({len(invalid_predictions)/len(self.prediction_history)*100:.1f}%)")
-            if invalid_predictions:
-                # Analisar razões das rejeições
-                rejection_reasons = {}
-                for item in invalid_predictions:
-                    reason = item['prediction'].get('reason', 'unknown')
-                    rejection_reasons[reason] = rejection_reasons.get(reason, 0) + 1
-                
-                print("Razões das rejeições:")
-                for reason, count in rejection_reasons.items():
-                    percentage = (count / len(invalid_predictions)) * 100
-                    if reason == 'too_many_nulls':
-                        print(f"  Muitos valores ausentes: {count} ({percentage:.1f}%)")
-                    elif reason == 'low_confidence':
-                        print(f"  Confiança baixa: {count} ({percentage:.1f}%)")
-                    else:
-                        print(f"  {reason}: {count} ({percentage:.1f}%)")
-            
-            # Análise dos valores 500
-            all_500s = [p['num_500s'] for p in self.prediction_history]
-            if all_500s:
-                print(f"\nAnálise de valores 500.0 (landmarks não detectados):")
-                print(f"  Média: {np.mean(all_500s):.1f} valores por frame")
-                print(f"  Min: {min(all_500s)}, Max: {max(all_500s)}")
-                print(f"  Percentagem média: {np.mean(all_500s)/1629*100:.1f}%")
-        
-        # Verificar se o preprocessamento estava correto
-        """if self.predictor.scaler is None:
-            print("\n⚠️ AVISO: A sessão foi executada SEM os preprocessadores corretos!")
-            print("   As predições podem não ter sido precisas.")
-            print("   Certifique-se de fornecer os caminhos para o Scaler e Imputer.")"""
-        
-        print("="*60)
+        print(f"\n[FINAL] 📊 Estatísticas da sessão:")
+        print(f"[FINAL] Frames processados: {self.frame_count}")
+        print(f"[FINAL] Tempo total: {total_time:.1f}s")
+        print(f"[FINAL] FPS médio: {avg_fps:.1f}")
+        print(f"[FINAL] 🔚 Sistema encerrado")
 
 
-# =============== FUNÇÃO PRINCIPAL ===============
+# ===========================================================================================
+# FUNÇÃO PRINCIPAL
+# ===========================================================================================
+
 def main():
-    """Função principal."""
+    """Função principal do programa."""
     try:
-        # Caminho para o modelo treinado com coordenadas apenas (sem visibilidade)
-        #MODEL_PATH = "data/output2/trained_model_4classes_corrected.pth"
-        MODEL_PATH = "../data/output28/trained_model_coordinates_only.pth"
-        SCALER_PATH = None  # Não usado neste modelo
-        IMPUTER_PATH = None  # Não usado neste modelo
-
-        print("\n" + "="*60)
-        print("SISTEMA DE CAPTURA COM PREDIÇÃO - MODELO COORDENADAS ONLY (1-4)")
-        print("="*60)
-        print(f"Modelo: {MODEL_PATH}")
-        print("Scaler: [NÃO USADO]")
-        print("Imputer: [NÃO USADO]")
-        print("="*60)
-
-        # Verifica se o ficheiro do modelo existe
-        if not os.path.exists(MODEL_PATH):
-            print(f"❌ ERRO: Modelo não encontrado em {MODEL_PATH}")
+        print("🎯 Sistema de Predições em Tempo Real")
+        print("=" * 60)
+        
+        # Caminho do modelo (ajustar conforme necessário)
+        model_path = Path(__file__).resolve().parent / ".." / "data" / "dataset30" / "output30" / "trained_model_coordinates_only.pth"
+        
+        # Verificar se modelo existe
+        if not model_path.exists():
+            print(f"❌ Modelo não encontrado em: {model_path}")
+            print("💡 Certifique-se de que o modelo foi treinado e salvo corretamente.")
             return
-
-        print("\n✅ Modelo encontrado!")
-
-        # Criar sistema de captura com predição sem scaler/imputer
-        capture_system = VideoCaptureWithPrediction(
-            model_path=MODEL_PATH,
-            #scaler_path=SCALER_PATH,
-            #imputer_path=IMPUTER_PATH,
-            show_visualization=True,
-            target_fps=30.0,
-            null_threshold=0.95,
-            confidence_threshold=0.3
-        )
-
-        # Iniciar captura com debug ativado
-        capture_system.capture(debug_mode=True)
-
+        
+        print(f"[MAIN] Modelo encontrado: {model_path}")
+        
+        # Mostrar funcionalidades
+        print(f"\n🎯 Funcionalidades Ativas:")
+        print(f"⚡ - Predições em tempo real")
+        print(f"🎬 - Captura de pose com MediaPipe")
+        print(f"📊 - Suavização de predições")
+        print(f"🔍 - Visualização de confiança")
+        print(f"🎯 - Detecção de estabilidade")
+        
+        # Inicializar sistema
+        print(f"\n[MAIN] Iniciando em 3 segundos...")
+        time.sleep(3)
+        
+        system = RealtimePredictionSystem(str(model_path))
+        system.run()
+        
     except KeyboardInterrupt:
-        print("\nPrograma interrompido pelo utilizador.")
+        print("\n[MAIN] 🛑 Interrompido pelo utilizador")
     except Exception as e:
-        print(f"Erro durante a execução: {e}")
+        print(f"\n[ERROR] ❌ Erro: {e}")
         import traceback
         traceback.print_exc()
     finally:
-        print("A encerrar programa...")
+        print("[MAIN] 🔚 Programa terminado")
+
 
 if __name__ == "__main__":
     main()
