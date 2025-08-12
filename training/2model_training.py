@@ -318,7 +318,7 @@ class ModelStatistics:
 # CARREGAMENTO E PREPARAÇÃO DOS DADOS
 # ============================================================================
 
-csv_path_output = Path(__file__).resolve().parent / ".." / "data" / "dataset28" / "combinado28.csv"
+csv_path_output = Path(__file__).resolve().parent / ".." / "data" / "dataset30" / "combinado30.csv"
 merged_df = pd.read_csv(csv_path_output)
 merged_df.info()
 merged_df.describe().round(3)
@@ -331,12 +331,12 @@ print(f"Shape do DataFrame original: {merged_df.shape}")
 # ============================================================================
 
 print("\n=== EXCLUSÃO DAS FEATURES DE VISIBILIDADE ===")
-
+"""
 # Definir features de visibilidade a serem excluídas
 visibility_features_to_exclude = ['Face','Pose','RightHand','LeftHand']
 
 # Colunas a excluir (features de visibilidade + colunas não-feature)
-excluded_columns = ['MillisSinceEpoch','LocalMillisProcessing','AnimacaoAtual','ValorMapeado','Valor'] + visibility_features_to_exclude
+excluded_columns = ['MillisSinceEpoch','LocalMillisProcessing','AnimacaoAtual','VirtualTime','ValorMapeado','Valor'] + visibility_features_to_exclude
 
 print("AQUI", excluded_columns)
 # Verificar quais features de visibilidade existem no dataset
@@ -351,7 +351,7 @@ if missing_visibility_features:
 if not existing_visibility_features:
     print(f"⚠️ Nenhuma feature de visibilidade encontrada com nomes esperados.")
     print(f"Assumindo que as primeiras 4 colunas são features de visibilidade...")
-    all_columns = [col for col in merged_df.columns if col not in ['MillisSinceEpoch','LocalMillisProcessing','AnimacaoAtual','ValorMapeado', 'Valor']]
+    all_columns = [col for col in merged_df.columns if col not in ['MillisSinceEpoch','LocalMillisProcessing','AnimacaoAtual','ValorMapeado', 'Valor','VirtualTime']]
     if len(all_columns) >= 4:
         existing_visibility_features = all_columns[:4]
         excluded_columns.extend(existing_visibility_features)
@@ -375,7 +375,7 @@ def exclude_columns_by_pattern(df, exclude_patterns):
     coordinate_features = [col for col in all_columns if col not in columns_to_exclude]
     return coordinate_features, columns_to_exclude
 
-exclude_patterns = ['MillisSinceEpoch', 'LocalMillisProcessing', 'AnimacaoAtual', 
+exclude_patterns = ['MillisSinceEpoch', 'LocalMillisProcessing', 'AnimacaoAtual','VirtualTime',
                    'ValorMapeado', 'Valor', 'Face', 'Pose', 'RightHand', 'LeftHand']
 
 coordinate_features, excluded_columns_actual = exclude_columns_by_pattern(merged_df, exclude_patterns)
@@ -401,7 +401,25 @@ X_coordinates_df = merged_df[coordinate_features].copy()
 print(f"Dados de coordenadas selecionados - Shape: {X_coordinates_df.shape}")
 print(f"Estatísticas básicas das coordenadas:")
 print(X_coordinates_df.describe().round(3))
+"""
 
+# Colunas a excluir (features de visibilidade + colunas não-feature)
+excluded_columns = ['MillisSinceEpoch','LocalMillisProcessing','AnimacaoAtual','ValorMapeado','Valor','VirtualTime','Face','Pose','RightHand','LeftHand','AnimacaoAtual.1'] 
+print("Excluded Columns", excluded_columns)
+
+# Selecionar apenas features de coordenadas
+coordinate_features = [col for col in merged_df.columns if col not in excluded_columns]
+
+print(f"\n✅ RESULTADO DA SELEÇÃO:")
+print(f"   Features de coordenadas MANTIDAS ({len(coordinate_features)}): {coordinate_features[:10]}... (+{len(coordinate_features)-10} mais)")
+print(f"   Total de features para treino: {len(coordinate_features)}")
+
+# Selecionar apenas dados de coordenadas
+X_coordinates_df = merged_df[coordinate_features].copy()
+
+print(f"Dados de coordenadas selecionados - Shape: {X_coordinates_df.shape}")
+print(f"Estatísticas básicas das coordenadas:")
+print(X_coordinates_df.describe().round(3))
 # ============================================================================
 # FILTRAR LINHAS COM VALORES 500.0 (EM VEZ DE IMPUTAR)
 # ============================================================================
@@ -517,7 +535,7 @@ print(f"  Classes únicas: {np.unique(y)}")
 # GUARDAR OBJETOS DE PREPROCESSAMENTO
 # ============================================================================
 
-model_objects_path = Path(__file__).resolve().parent / ".." / "data" / "output28"
+model_objects_path = Path(__file__).resolve().parent / ".." / "data" / "dataset30" / "output30"
 model_objects_path.mkdir(parents=True, exist_ok=True)
 
 class WeightedFlexibleModel(nn.Module):
@@ -814,26 +832,26 @@ print(f"Tempo total de treino: {sum(stats.epoch_times):.1f}s")
 print("\n=== GERANDO VISUALIZAÇÕES ===")
 
 # Plotar curvas de treino
-stats.plot_training_curves(save_path="../data/output28/training_curves_coordinates_only.png")
+stats.plot_training_curves(save_path="../data/dataset30/output30/training_curves_coordinates_only.png")
 
 # Plotar matriz de confusão
 class_names = [str(i) for i in range(0, 4)]
 stats.plot_confusion_matrix(
     test_metrics['confusion_matrix'], 
     class_names=class_names,
-    save_path="../data/output28/confusion_matrix_coordinates_only.png"
+    save_path="../data/dataset30/output30/confusion_matrix_coordinates_only.png"
 )
 
 # SALVAR RESULTADOS
 stats.best_metrics = {'train': train_metrics, 'test': test_metrics}
 
 # Salvar estatísticas completas
-stats_path = Path(__file__).resolve().parent /".."/ "data" / "output28" / "training_statistics_coordinates_only.json"
+stats_path = Path(__file__).resolve().parent /".."/ "data" / "dataset30"/ "output30" / "training_statistics_coordinates_only.json"
 stats.save_all_statistics(stats_path)
 
 """# 6. SAVE MODEL AND PREPROCESSING OBJECTS"""
 # Guardar modelo com informações sobre uso apenas de coordenadas
-model_save_path = Path(__file__).resolve().parent /".." / "data" / "output28" / "trained_model_coordinates_only.pth"
+model_save_path = Path(__file__).resolve().parent /".." / "data" / "dataset30"/ "output30" / "trained_model_coordinates_only.pth"
 model_save_path.parent.mkdir(parents=True, exist_ok=True)
 
 model_info = {

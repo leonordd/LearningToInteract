@@ -6,10 +6,10 @@ from pathlib import Path
 MAX_TIMESTAMP_DIF = 200
 
 # Caminhos para os ficheiros CSV
-folder = "../data/dataset28"
-ficheiro_a = "dados_teclas3.csv" #ficheiro maior
-ficheiro_b = "v2.csv" #ficheiro menor
-resultado = "combinado28.csv"
+folder = "../data/dataset30"
+ficheiro_a = "dados_teclas2.csv" #ficheiro maior
+ficheiro_b = "v1.csv" #ficheiro menor
+resultado = "combinado30.csv"
 csv_path_a = Path(__file__).resolve().parent / folder / ficheiro_a #ficheiro maior
 csv_path_b = Path(__file__).resolve().parent / folder / ficheiro_b #ficheiro menor
 csv_path_output = Path(__file__).resolve().parent / folder / resultado

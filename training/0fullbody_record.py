@@ -27,6 +27,7 @@ import numpy as np
 import pandas as pd
 from datetime import datetime
 from typing import Dict, List, Tuple, Optional
+from pathlib import Path
 
 
 # ===========================================================================================
@@ -134,8 +135,8 @@ class TimeSync:
 class CSVDataReader:
     """Leitor inteligente de dados CSV com sincronização temporal."""
     
-    def __init__(self, csv_path: str):
-        self.csv_path = csv_path
+    def __init__(self, path_csv: str):
+        self.path_csv = path_csv
         self.data = None
         self.is_loaded = False
         self.time_column = None
@@ -146,13 +147,13 @@ class CSVDataReader:
         self.time_array = None
         self.animation_array = None
         
-        if csv_path and os.path.exists(csv_path):
+        if path_csv and os.path.exists(path_csv):
             self._load_csv()
     
     def _load_csv(self):
         """Carrega e processa o ficheiro CSV."""
         try:
-            self.data = pd.read_csv(self.csv_path)
+            self.data = pd.read_csv(self.path_csv)
             print(f"[CSV] ✅ Carregado: {len(self.data)} linhas")
             print(f"[CSV] Colunas: {list(self.data.columns)}")
             
@@ -290,8 +291,8 @@ class CSVDataReader:
 class VideoManager:
     """Gestor de vídeo de referência com sincronização temporal."""
     
-    def __init__(self, video_path: str):
-        self.video_path = video_path
+    def __init__(self, path_video: str):
+        self.path_video = path_video
         self.cap = None
         self.current_frame = None
         self.fps = 30
@@ -299,16 +300,16 @@ class VideoManager:
         self.current_frame_index = -1
         self.is_initialized = False
         
-        if os.path.exists(video_path):
+        if os.path.exists(path_video):
             self._initialize()
     
     def _initialize(self):
         """Inicializa o vídeo de referência."""
         try:
-            self.cap = cv2.VideoCapture(self.video_path)
+            self.cap = cv2.VideoCapture(self.path_video)
             
             if not self.cap.isOpened():
-                raise RuntimeError(f"Não foi possível abrir: {self.video_path}")
+                raise RuntimeError(f"Não foi possível abrir: {self.path_video}")
             
             self.fps = self.cap.get(cv2.CAP_PROP_FPS)
             self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -386,11 +387,11 @@ class LandmarkProcessor:
             return [Config.DEFAULT_LANDMARK_VALUE] * (expected_count * 3)
     
     @staticmethod
-    def create_csv_row(results, timestamp_ms: int, status: Dict[str, int], animation_original: str) -> List:
-        """Cria linha completa para CSV com valor original da animação."""
+    def create_csv_row(results, timestamp_ms: int, status: Dict[str, int]) -> List:
+        """Cria linha completa para CSV SEM AnimacaoAtual."""
         row = [timestamp_ms]
         row.extend([status["face"], status["pose"], status["right_hand"], status["left_hand"]])
-        row.append(animation_original)  # Guardar valor original no CSV
+        # REMOVIDO: row.append(animation_original)  # NÃO incluir AnimacaoAtual no CSV de saída
         
         # Extrair coordenadas
         pose_coords = LandmarkProcessor.extract_coordinates(
@@ -425,7 +426,7 @@ class FileManager:
     """Gestor de ficheiros de saída."""
     
     @staticmethod
-    def create_csv_path() -> Tuple[str, List[str]]:
+    def create_path_csv() -> Tuple[str, List[str]]:
         """Cria caminho e cabeçalho do CSV."""
         today = datetime.now().strftime('%Y_%m_%d')
         folder_path = os.path.join("../data", today)
@@ -436,15 +437,16 @@ class FileManager:
         while os.path.exists(os.path.join(folder_path, f'v{version}.csv')):
             version += 1
         
-        csv_path = os.path.join(folder_path, f'v{version}.csv')
+        path_csv = os.path.join(folder_path, f'v{version}.csv')
         header = FileManager._create_csv_header()
         
-        return csv_path, header
+        return path_csv, header
     
     @staticmethod
     def _create_csv_header() -> List[str]:
-        """Cria cabeçalho completo do CSV."""
-        header = ['MillisSinceEpoch', 'Face', 'Pose', 'RightHand', 'LeftHand', 'AnimacaoAtual']
+        """Cria cabeçalho completo do CSV SEM AnimacaoAtual."""
+        header = ['MillisSinceEpoch', 'Face', 'Pose', 'RightHand', 'LeftHand']
+        # REMOVIDO: 'AnimacaoAtual' do cabeçalho
         
         # Landmarks da pose
         for i in range(Config.NUM_POSE_LANDMARKS):
@@ -464,7 +466,7 @@ class FileManager:
         return header
     
     @staticmethod
-    def create_video_path() -> str:
+    def create_path_video() -> str:
         """Cria caminho do vídeo."""
         today = datetime.now().strftime('%Y_%m_%d')
         folder_path = os.path.join("../data", today)
@@ -597,12 +599,12 @@ class Visualizer:
 class PoseCaptureSystem:
     """Sistema principal de captura com sincronização temporal."""
     
-    def __init__(self, video_path: Optional[str] = None, csv_path: Optional[str] = None, 
+    def __init__(self, path_video: Optional[str] = None, path_csv: Optional[str] = None, 
                  split_screen: bool = True):
         # Componentes principais
         self.time_sync = TimeSync()
-        self.csv_reader = CSVDataReader(csv_path) if csv_path else None
-        self.video_manager = VideoManager(video_path) if video_path else None
+        self.csv_reader = CSVDataReader(path_csv) if path_csv else None
+        self.video_manager = VideoManager(path_video) if path_video else None
         self.split_screen = split_screen
         
         # MediaPipe
@@ -612,8 +614,8 @@ class PoseCaptureSystem:
         self.cap = self._setup_camera()
         
         # Ficheiros de saída
-        self.csv_path, self.csv_header = FileManager.create_csv_path()
-        self.video_path = FileManager.create_video_path()
+        self.path_csv, self.csv_header = FileManager.create_path_csv()
+        self.path_video = FileManager.create_path_video()
         
         # Dados
         self.frames = []
@@ -636,8 +638,8 @@ class PoseCaptureSystem:
     def _print_initialization_summary(self):
         """Imprime resumo da inicialização."""
         print("[INIT] 🎯 Sistema de Captura Inicializado")
-        print(f"[INIT] CSV: {self.csv_path}")
-        print(f"[INIT] Vídeo: {self.video_path}")
+        print(f"[INIT] CSV: {self.path_csv}")
+        print(f"[INIT] Vídeo: {self.path_video}")
         
         if self.csv_reader and self.csv_reader.is_loaded:
             print("[INIT] ✅ Dados CSV carregados")
@@ -686,7 +688,7 @@ class PoseCaptureSystem:
                     # Verificar drift
                     self.time_sync.check_drift(frame_count)
                     
-                    # Obter animação atual
+                    # Obter animação atual APENAS para display (não para CSV)
                     animation_original, animation_display, debug_info = "N/A", "N/A", ""
                     if self.csv_reader and self.csv_reader.is_loaded:
                         animation_original, animation_display, debug_info = self.csv_reader.get_animation_at_time(elapsed_s)
@@ -696,26 +698,26 @@ class PoseCaptureSystem:
                     image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
                     results = holistic.process(image_rgb)
                     
-                    # Recolher dados (guardar valor original no CSV)
+                    # Recolher dados SEM incluir AnimacaoAtual
                     status = LandmarkProcessor.get_detection_status(results)
-                    csv_row = LandmarkProcessor.create_csv_row(results, timestamp_ms, status, animation_original)
+                    csv_row = LandmarkProcessor.create_csv_row(results, timestamp_ms, status)  # REMOVIDO animation_original
                     self.csv_data.append(csv_row)
                     
-                    # Debug periódico (mostrar valor +1)
+                    # Debug periódico (mostrar valor +1 apenas para display)
                     if frame_count % Config.DEBUG_FRAME_INTERVAL == 0:
                         fps = frame_count / elapsed_s if elapsed_s > 0 else 0
                         display_anim = animation_display.split(' (')[0] if animation_display else "N/A"
                         print(f"[DEBUG] Frame {frame_count}: "
-                              f"F{status['face']}P{status['pose']}L{status['left_hand']}R{status['right_hand']} "
-                              f"T={elapsed_s:.2f}s FPS={fps:.1f} Anim={display_anim}")
+                            f"F{status['face']}P{status['pose']}L{status['left_hand']}R{status['right_hand']} "
+                            f"T={elapsed_s:.2f}s FPS={fps:.1f} Anim={display_anim}")
                     
-                    # Visualização (mostrar valor +1)
+                    # Visualização (mostrar valor +1 apenas na interface)
                     image.flags.writeable = True
                     image = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
                     
                     Visualizer.draw_landmarks(image, results)
                     Visualizer.add_info_overlay(image, frame_count, elapsed_ms, animation_display, debug_info,
-                                               self.video_manager is not None)
+                                            self.video_manager is not None)
                     
                     self._display_frames(image, elapsed_s)
                     self.frames.append(image.copy())
@@ -777,22 +779,9 @@ class PoseCaptureSystem:
         self._print_final_report(stats)
     
     def _save_csv(self, stats: Dict[str, float]):
-        """Guarda ficheiro CSV com metadados."""
-        with open(self.csv_path, 'w', newline='', encoding='utf-8') as file:
+        """Guarda ficheiro CSV apenas com cabeçalho e dados."""
+        with open(self.path_csv, 'w', newline='', encoding='utf-8') as file:
             writer = csv.writer(file)
-            
-            # Metadados
-            writer.writerow([f'# Captura iniciada: {datetime.fromtimestamp(stats["start_timestamp"]).isoformat()}'])
-            writer.writerow([f'# Duração: {stats["elapsed_seconds"]:.3f}s'])
-            writer.writerow([f'# Frames: {len(self.frames)}'])
-            writer.writerow([f'# FPS médio: {stats["fps"]:.2f}'])
-            writer.writerow([f'# Drift corrections: {stats["drift_corrections"]}'])
-            
-            if self.csv_reader and self.csv_reader.is_loaded:
-                writer.writerow([f'# CSV referência: {self.csv_reader.csv_path}'])
-                writer.writerow([f'# FPS CSV: {self.csv_reader.fps_detected:.2f}'])
-            
-            writer.writerow(['# --- DADOS ---'])
             writer.writerow(self.csv_header)
             writer.writerows(self.csv_data)
     
@@ -805,7 +794,7 @@ class PoseCaptureSystem:
         
         # Gravar vídeo
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        writer = cv2.VideoWriter(self.video_path, fourcc, target_fps,
+        writer = cv2.VideoWriter(self.path_video, fourcc, target_fps,
                                 (Config.CAMERA_WIDTH, Config.CAMERA_HEIGHT))
         
         for frame in self.frames:
@@ -832,8 +821,8 @@ class PoseCaptureSystem:
         print(f"[FINAL] 🎬 FPS médio: {stats['fps']:.2f}")
         print(f"[FINAL] 📐 Precisão temporal: ±{time_accuracy:.3f}s ({quality})")
         print(f"[FINAL] 🔧 Correções drift: {stats['drift_corrections']}")
-        print(f"[FINAL] 📊 CSV: {self.csv_path}")
-        print(f"[FINAL] 🎥 Vídeo: {self.video_path}")
+        print(f"[FINAL] 📊 CSV: {self.path_csv}")
+        print(f"[FINAL] 🎥 Vídeo: {self.path_video}")
         
         if self.csv_reader and self.csv_reader.is_loaded:
             print(f"[FINAL] 🔗 Sincronização CSV: ATIVA")
@@ -857,15 +846,19 @@ def main():
         print("="*70)
         
         # Caminhos dos ficheiros
-        video_path = "../data/dataset28/video3.mp4"
-        csv_path = "../data/dataset28/dados_teclas3.csv"
+        folder = "../data/dataset30"
+        video = "video2.mp4"
+        csv = "dados_teclas2.csv"
+
+        path_video = Path(__file__).resolve().parent / folder / video
+        path_csv = Path(__file__).resolve().parent / folder / csv
         
         # Verificar ficheiros
-        video_exists = os.path.exists(video_path)
-        csv_exists = os.path.exists(csv_path)
+        video_exists = os.path.exists(path_video)
+        csv_exists = os.path.exists(path_csv)
         
-        print(f"[MAIN] Vídeo: {'✅' if video_exists else '❌'} {video_path}")
-        print(f"[MAIN] CSV: {'✅' if csv_exists else '❌'} {csv_path}")
+        print(f"[MAIN] Vídeo: {'✅' if video_exists else '❌'} {path_video}")
+        print(f"[MAIN] CSV: {'✅' if csv_exists else '❌'} {path_csv}")
         
         # Validar CSV
         if not csv_exists:
@@ -874,16 +867,16 @@ def main():
             
             if input("Continuar sem CSV? (s/N): ").strip().lower() != 's':
                 return
-            csv_path = None
+            path_csv = None
         
         # Validar vídeo
         if not video_exists:
             print("⚠️  Vídeo de referência não encontrado!")
-            video_path = None
+            path_video = None
         
         # Escolher modo de visualização
         split_screen = True
-        if video_path:
+        if path_video:
             print("\n[MAIN] Modo de visualização:")
             print("1 - Tela dividida (recomendado)")
             print("2 - Janelas separadas")
@@ -896,16 +889,16 @@ def main():
         print("⏱️  - Sincronização temporal de alta precisão")
         print("🔄 - Detecção automática de drift")
         print("📊 - Monitorização FPS em tempo real")
-        if csv_path:
+        if path_csv:
             print("📋 - Integração com dados CSV")
-        if video_path:
+        if path_video:
             print("🎬 - Vídeo de referência sincronizado")
         
         # Inicializar e executar
         print("\n[MAIN] Iniciando em 3 segundos...")
         time.sleep(3)
         
-        system = PoseCaptureSystem(video_path, csv_path, split_screen)
+        system = PoseCaptureSystem(path_video, path_csv, split_screen)
         system.run()
         
     except KeyboardInterrupt:
