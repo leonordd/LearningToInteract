@@ -1,6 +1,10 @@
 ///version 4 inicializa o python através do processing
 import javax.swing.JOptionPane;
+import java.io.*;
+
 NetworkManager network;
+NetworkManagerTrain networkTrain;
+
 ArrayList<Circle> circles = new ArrayList<Circle>();
 ArrayList<ArrayList<Keyframe[]>> allAnimationKeyframes = new ArrayList<ArrayList<Keyframe[]>>();
 CaptureManager captureManager;
@@ -84,6 +88,7 @@ void setup() {
   surface.setTitle("Learning To Interact");
   modeManager = new ModeManager();
   network = new NetworkManager();
+  networkTrain = new NetworkManagerTrain();
   fileManager = new FileManager();
   captureManager = new CaptureManager(fileManager, this);
   debug = new DebugWindow();
@@ -107,7 +112,8 @@ void setup() {
     initializeAllAnimations(n_circles);
     // (opcional) alterar frames e duração da gravação
   } else if (modeManager.isModoJogoComTreino()) {
-    network.beginConnection();
+    startPythonAndConnect();
+    //networkTrain.connect("127.0.0.1", 60345);
     initializeAllAnimations(n_circles);
   }
   captureManager.inicializar();
@@ -201,12 +207,28 @@ void draw() {
       //captureManager.executarCaptura(); //captura apenas o ecrã
     }
   } else if (modeManager.isModoJogoComTreino()) {
-    print("A");
-
+    //print("A");
+    //println(networkTrain.getCurrentAnimation());
     //iniciar script de python com path "1input_not_pred.py"
     //iniciarScriptPythonTreino();
     //receber valor da animação (ou seja as classes predicted 1,2,3,4)
     //update currentAnimation para o valor da animação. Ou seja selecionar a animação consoante o (valor que vem da rede - 1)
+
+
+    // Debug mais detalhado
+    boolean connected = networkTrain.isConnected();
+    int currentAnim = networkTrain.getCurrentAnimation();
+    //long msSinceLastRx = networkTrain.getMsSinceLastRx();
+
+    if (connected && currentAnim > 0 && currentAnim <= maxAnimation) {
+      currentAnimation = currentAnim - 1; // Converter de 1-4 para 0-3
+
+      // Desenhar a animação
+      float t = 5.0; // Valor fixo ou baseado em outros dados
+      updateAndDrawAnimation(t, 0, 0, width);
+      updateAnimationCounter();
+      updateDebugWindow_Treino();
+    }
   } else {
     if (estavaNoModoJogo) {
       println("Saiu do modo jogo. A terminar script Python...");
@@ -804,6 +826,78 @@ void updateDebugWindow_Jogo(NetworkData data) {
   debug.setDebugText(debugInfo.toString());
 }
 
+void updateDebugWindow_Treino() {
+  StringBuilder debugInfo = new StringBuilder();
+  
+  // Informações do modo treino
+  debugInfo.append("=== MODO TREINO ===\n");
+  debugInfo.append("Animação: ").append(animationNames[currentAnimation]).append("\n");
+  debugInfo.append("Anim ID: ").append(currentAnimation + 1).append("\n\n");
+  
+  // Status da conexão e comunicação
+  boolean connected = networkTrain.isConnected();
+  int currentAnim = networkTrain.getCurrentAnimation();
+  long msSinceLastRx = networkTrain.getMsSinceLastRx();
+  
+  debugInfo.append("=== COMUNICAÇÃO COM PYTHON ===\n");
+  debugInfo.append("Ligação: ").append(connected ? "✓ OK" : "✗ OFF").append("\n");
+  debugInfo.append("Anim recebida: ").append(currentAnim).append("\n");
+  debugInfo.append("Processo Python: ").append(processoPython != null && processoPython.isAlive() ? "✓ VIVO" : "✗ MORTO").append("\n");
+  debugInfo.append("Última recepção: ").append(msSinceLastRx >= 0 ? msSinceLastRx + "ms" : "NUNCA").append("\n");
+  
+  if (processoPython != null) {
+    debugInfo.append("PID Python: ").append(processoPython.pid()).append("\n");
+  }
+  debugInfo.append("\n");
+  
+  // Dados da rede (mãos, gestos, etc)
+  NetworkData nd = networkTrain.getNetworkData();
+  debugInfo.append("=== DADOS DAS MÃOS ===\n");
+  debugInfo.append(String.format("Distância Mão Direita: %.2f", nd.distanciaMaoDireita));
+  debugInfo.append(nd.validMaoDireita ? " ✓\n" : " ✗\n");
+  debugInfo.append(String.format("Distância Mão Esquerda: %.2f", nd.distanciaMaoEsquerda));
+  debugInfo.append(nd.validMaoEsquerda ? " ✓\n" : " ✗\n");
+  debugInfo.append(String.format("Ângulo Mão Esquerda: %.1f°", nd.anguloMaoEsquerda));
+  debugInfo.append(nd.validAnguloEsquerda ? " ✓\n" : " ✗\n");
+  debugInfo.append(String.format("Ângulo Vertical: %.1f°", nd.anguloVerticalMaoEsquerda)).append("\n\n");
+  
+  // Informações de captura (se estiver gravando)
+  if (captureManager != null && captureManager.isRecording()) {
+    CaptureInfo captureInfo = captureManager.getCaptureInfo();
+    debugInfo.append("=== CAPTURA ===\n");
+    debugInfo.append("Status: ● A GRAVAR\n");
+    debugInfo.append("Frames: ").append(captureInfo.capturedFrames)
+      .append(" / ").append(captureInfo.targetFrames).append("\n\n");
+  }
+  
+  // Estatísticas das animações
+  debugInfo.append("=== ESTATÍSTICAS ===\n");
+  debugInfo.append("Total frames: ").append(totalFrames).append("\n");
+  
+  for (int i = 0; i < maxAnimation; i++) {
+    float percentage = totalFrames > 0 ? (animationOccurrences[i] * 100.0f / totalFrames) : 0;
+    String marker = (i == currentAnimation) ? " ◄" : "";
+    debugInfo.append("Anim ").append(i).append(": ")
+      .append(animationOccurrences[i]).append(" (")
+      .append(nf(percentage, 1, 1)).append("%)").append(marker).append("\n");
+  }
+  
+  // Informações do sistema
+  debugInfo.append("\nFPS: ").append(nf(frameRate, 0, 1));
+  debugInfo.append("\nFrame: ").append(frameCount);
+  
+  // Controles disponíveis
+  debugInfo.append("\n\n=== CONTROLES ===\n");
+  debugInfo.append("[M] - Testar conexão\n");
+  debugInfo.append("[X] - Restart Python\n");
+  debugInfo.append("[T] - Toggle contagem\n");
+  debugInfo.append("[P] - Print estatísticas\n");
+  debugInfo.append("[S] - Salvar estatísticas");
+  
+  // Atualizar a debug window
+  debug.setDebugText(debugInfo.toString());
+}
+
 void iniciarScriptPython() {
   try {
     // Caminho absoluto ou relativo ao ficheiro .py
@@ -841,42 +935,142 @@ void terminarScriptPython() {
   }
 }
 
-void iniciarScriptPythonTreino() {
+// === Configura aqui o caminho do Python e do script ===
+final String PYTHON_PATH = "/Users/leonor/miniconda3/bin/python3";
+final String PY_SCRIPT   = "1input_not_pred.py"; // ou "0input_pred.py" se preferires
+
+void startPythonAndConnect() {
   try {
-    // Caminho absoluto ou relativo ao ficheiro .py
-    String scriptPath = sketchPath("0input_pred.py"); // sketchPath("mediapipe_holistic.py");
-    String pythonPath ="/Users/leonor/miniconda3/bin/python3";
-    ProcessBuilder pb = new ProcessBuilder(pythonPath, scriptPath);
+    // Caminho absoluto para o script dentro da pasta do sketch
+    String scriptPath = sketchPath(PY_SCRIPT);
+
+    println("[startPython] Verificando se o script existe: " + scriptPath);
+    File scriptFile = new File(scriptPath);
+    if (!scriptFile.exists()) {
+      println("[ERRO] Script não encontrado: " + scriptPath);
+      return;
+    }
+
+    // Arrancar o Python
+    ProcessBuilder pb = new ProcessBuilder(PYTHON_PATH, scriptPath);
     pb.redirectErrorStream(true); // junta stdout e stderr
     processoPython = pb.start();
+    println("[Python] processo iniciado: " + PYTHON_PATH + " " + scriptPath);
 
-    // Opcional: Ler o output do processo
+    // Ler o output do Python num thread separado (não bloquear o draw)
     new Thread(() -> {
-      try {
-        BufferedReader reader = new BufferedReader(new InputStreamReader(processoPython.getInputStream()));
+      try (BufferedReader reader =
+        new BufferedReader(new InputStreamReader(processoPython.getInputStream()))) {
         String linha;
         while ((linha = reader.readLine()) != null) {
           println("[Python] " + linha);
+
+          // Procurar por mensagens específicas do servidor
+          if (linha.contains("A ouvir em") || linha.contains("Servidor") || linha.contains("60345")) {
+            println("[Python] Servidor parece estar pronto!");
+          }
         }
       }
       catch (IOException e) {
-        e.printStackTrace();
+        println("[Python] erro a ler stdout: " + e.getMessage());
       }
     }
-    ).start();
+    , "Py-STDOUT").start();
+
+    // AUMENTAR o atraso para dar mais tempo ao servidor abrir
+    println("[startPython] Aguardando 3 segundos para o servidor Python iniciar...");
+    delay(3000);
+
+    // Tentar conectar ao socket com mais tentativas e mais tempo
+    connectWithRetryTrain("127.0.0.1", 60345, 10, 1000);
   }
   catch (IOException e) {
-    e.printStackTrace();
+    println("[startPythonAndConnect] Falha ao iniciar Python: " + e.getMessage());
   }
 }
 
-void terminarScriptPythonTreino() {
+// Retry robusto para o NetworkManagerTrain - MELHORADO
+void connectWithRetryTrain(String host, int port, int tentativas, int esperaMs) {
+  for (int i = 1; i <= tentativas; i++) {
+    println("[NetworkTrain] Tentativa " + i + "/" + tentativas + " ligar a " + host + ":" + port);
+
+    // Verificar se o processo Python ainda está vivo
+    if (processoPython != null && !processoPython.isAlive()) {
+      println("[ERRO] Processo Python morreu! ExitCode: " + processoPython.exitValue());
+      return;
+    }
+
+    networkTrain.connect(host, port);
+
+    // Dar um pouco de tempo para a conexão ser estabelecida
+    delay(200);
+
+    if (networkTrain.isConnected()) {
+      println("[NetworkTrain] ✓ Conectado com sucesso na tentativa " + i);
+      return;
+    } else {
+      println("[NetworkTrain] ✗ Tentativa " + i + " falhou");
+    }
+
+    if (i < tentativas) {
+      println("[NetworkTrain] Aguardando " + esperaMs + "ms antes da próxima tentativa...");
+      delay(esperaMs);
+    }
+  }
+  println("[NetworkTrain] ✗ FALHA: Não foi possível conectar após " + tentativas + " tentativas.");
+  println("[NetworkTrain] Verifique se o script Python está funcionando corretamente.");
+}
+
+// ADICIONAR esta função para testar a conexão manualmente
+void testConnection() {
+  println("\n=== TESTE DE CONEXÃO ===");
+  println("Processo Python vivo: " + (processoPython != null && processoPython.isAlive()));
+  println("NetworkTrain conectado: " + networkTrain.isConnected());
+
   if (processoPython != null) {
-    processoPython.destroy();
-    processoPython = null;
-    println("Script Python terminado.");
+    println("Processo Python PID: " + processoPython.pid());
+  }
+
+  // Tentar reconectar
+  if (!networkTrain.isConnected()) {
+    println("Tentando reconectar...");
+    networkTrain.disconnect();
+    delay(500);
+    networkTrain.connect("127.0.0.1", 60345);
+    delay(500);
+    println("Resultado da reconexão: " + networkTrain.isConnected());
   }
 }
+
+// MELHORAR a função stopPython
+void stopPython() {
+  if (processoPython != null) {
+    try {
+      println("[stopPython] Terminando processo Python...");
+
+      // Primeiro tentar terminar graciosamente
+      processoPython.destroy();
+
+      // Esperar um pouco
+      boolean finished = processoPython.waitFor(2, java.util.concurrent.TimeUnit.SECONDS);
+
+      if (!finished) {
+        println("[stopPython] Processo não terminou, forçando...");
+        processoPython.destroyForcibly();
+        processoPython.waitFor();
+      }
+
+      println("[stopPython] ✓ Python terminado. ExitCode=" + processoPython.exitValue());
+    }
+    catch (Exception e) {
+      println("[stopPython] erro ao terminar Python: " + e.getMessage());
+    }
+    finally {
+      processoPython = null;
+    }
+  }
+}
+
 
 void exit() {
   if (network != null && network.isConnected()) {
