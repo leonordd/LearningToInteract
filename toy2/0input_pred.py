@@ -228,6 +228,14 @@ receive_thread.start()
 
 print("[Python] Thread de recepção iniciada")
 
+def mapear_valor(valor, min_entrada, max_entrada, min_saida, max_saida):
+    # Garante que o valor está dentro dos limites
+    valor = max(min_entrada, min(max_entrada, valor))
+    
+    # Fórmula de mapeamento linear
+    valor_mapeado = (valor - min_entrada) / (max_entrada - min_entrada) * (max_saida - min_saida) + min_saida
+    return valor_mapeado
+
 with mp_holistic.Holistic(
         min_detection_confidence=0.5,
         min_tracking_confidence=0.5) as holistic:
@@ -259,8 +267,9 @@ with mp_holistic.Holistic(
 
             distancia = calcular_distancia(results, 'mao_direita', 4, 8)
             if distancia:
-                cv2.putText(image, f"raio: {distancia:.4f}", (x1 + 20, y1 - 20),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                valor_key_transformado = mapear_valor(distancia, 0.05, 0.3, 0, 5)
+                cv2.putText(image, f"Keyframes: {valor_key_transformado:.4f}", (x1 + 20, y1 - 20),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
         if results.left_hand_landmarks:
             p4e = results.left_hand_landmarks.landmark[4]
@@ -279,8 +288,9 @@ with mp_holistic.Holistic(
             # Distância da mão esquerda
             distancia_e = calcular_distancia(results, 'mao_esquerda', 4, 8)
             if distancia_e:
-                cv2.putText(image, f"raio: {distancia_e:.4f}", (x1e + 20, y1e - 20),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                valor_transformado = mapear_valor(distancia_e, 0.05, 0.3, 0, 5)
+                cv2.putText(image, f"Transformar: {valor_transformado:.2f}", (x1e + 20, y1e - 20),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
             
             # Linha branca
             cv2.line(image, (x1e, y1e), (x2e, y2e), (255, 255, 255), 2)
@@ -304,7 +314,7 @@ with mp_holistic.Holistic(
                 anim_text = f"Anim: {current_animation}"
                 
             cv2.putText(image, anim_text, (x3e + 20, y3e ),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
             dados_angulo = {
                 "parte": "mao_esquerda",
@@ -320,6 +330,7 @@ with mp_holistic.Holistic(
 
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
+
 
 # Libertar recursos
 cap.release()
