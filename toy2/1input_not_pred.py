@@ -604,8 +604,15 @@ def main():
     print("🎯 Sistema de Predições em Tempo Real")
     print("=" * 60)
 
+    # Caminhos a alterar em cada teste
+    dataset_folder = "dataset30"
+
+    #Caminhos fixos
+    csv_file = "combinado.csv"  # Ficheiro combinado
+    output_folder = "output"  # Pasta de saída para resultados
+
     # Caminho do modelo (ajusta consoante a tua estrutura)
-    model_path = Path(__file__).resolve().parent / ".." / "data" / "dataset30" / "output30" / "trained_model_coordinates_only.pth"
+    model_path = Path(__file__).resolve().parent / ".." / "data" / dataset_folder / output_folder / "trained_model.pth"
 
     if not model_path.exists():
         print(f"❌ Modelo não encontrado em: {model_path}")

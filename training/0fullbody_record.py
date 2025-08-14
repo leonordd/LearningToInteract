@@ -846,12 +846,13 @@ def main():
         print("="*70)
         
         # Caminhos dos ficheiros
-        folder = "../data/dataset30"
+        #folder = "../data/dataset30"
+        folder_video_and_csv = "../data/0base"
         video = "video1.mp4"
         csv = "dados_teclas1.csv"
 
-        path_video = Path(__file__).resolve().parent / folder / video
-        path_csv = Path(__file__).resolve().parent / folder / csv
+        path_video = Path(__file__).resolve().parent / folder_video_and_csv / video
+        path_csv = Path(__file__).resolve().parent / folder_video_and_csv / csv
         
         # Verificar ficheiros
         video_exists = os.path.exists(path_video)

@@ -902,7 +902,7 @@ void iniciarScriptPython() {
   try {
     // Caminho absoluto ou relativo ao ficheiro .py
     String scriptPath = sketchPath("0input_pred.py"); // sketchPath("mediapipe_holistic.py");
-    String pythonPath ="/Users/leonor/miniconda3/bin/python3";
+    String pythonPath ="/Library/Frameworks/Python.framework/Versions/3.10/bin/python3";
     ProcessBuilder pb = new ProcessBuilder(pythonPath, scriptPath);
     pb.redirectErrorStream(true); // junta stdout e stderr
     processoPython = pb.start();
@@ -936,7 +936,7 @@ void terminarScriptPython() {
 }
 
 // === Configura aqui o caminho do Python e do script ===
-final String PYTHON_PATH = "/Users/leonor/miniconda3/bin/python3";
+final String PYTHON_PATH = "/Library/Frameworks/Python.framework/Versions/3.10/bin/python3";
 final String PY_SCRIPT   = "1input_not_pred.py"; // ou "0input_pred.py" se preferires
 
 void startPythonAndConnect() {

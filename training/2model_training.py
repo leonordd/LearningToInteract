@@ -29,6 +29,12 @@ import time
 import json
 from collections import defaultdict
 
+# Caminhos a alterar em cada teste
+dataset_folder = "dataset30"
+
+#Caminhos fixos
+csv_file = "combinado.csv"  # Ficheiro combinado
+output_folder = "output"  # Pasta de saída para resultados
 
 # ============================================================================
 # CLASSE PARA ESTATÍSTICAS COMPLETAS (MANTIDA IGUAL)
@@ -319,7 +325,7 @@ class ModelStatistics:
 # CARREGAMENTO E PREPARAÇÃO DOS DADOS
 # ============================================================================
 
-csv_path_output = Path(__file__).resolve().parent / ".." / "data" / "dataset30" / "combinado30.csv"
+csv_path_output = Path(__file__).resolve().parent / ".." / "data" / dataset_folder / csv_file
 merged_df = pd.read_csv(csv_path_output)
 merged_df.info()
 merged_df.describe().round(3)
@@ -412,7 +418,7 @@ print(f"  Classes únicas: {np.unique(y)}")
 # GUARDAR OBJETOS DE PREPROCESSAMENTO
 # ============================================================================
 
-model_objects_path = Path(__file__).resolve().parent / ".." / "data" / "dataset30" / "output30"
+model_objects_path = Path(__file__).resolve().parent / ".." / "data" / dataset_folder / output_folder
 model_objects_path.mkdir(parents=True, exist_ok=True)
 
 class WeightedFlexibleModel(nn.Module):
@@ -708,26 +714,26 @@ print(f"Tempo total de treino: {sum(stats.epoch_times):.1f}s")
 print("\n=== GERANDO VISUALIZAÇÕES ===")
 
 # Plotar curvas de treino
-stats.plot_training_curves(save_path="../data/dataset30/output30/training_curves_coordinates_only.png")
+stats.plot_training_curves(save_path = Path(__file__).resolve().parent /".."/ "data" / dataset_folder / output_folder / "training_curves.png") #coordinates_only
 
 # Plotar matriz de confusão
 class_names = [str(i) for i in range(0, 4)]
 stats.plot_confusion_matrix(
     test_metrics['confusion_matrix'], 
     class_names=class_names,
-    save_path="../data/dataset30/output30/confusion_matrix_coordinates_only.png"
+    save_path = Path(__file__).resolve().parent /".."/ "data" / dataset_folder / output_folder / "confusion_matrix.png" #coordinates_only
 )
 
 # SALVAR RESULTADOS
 stats.best_metrics = {'train': train_metrics, 'test': test_metrics}
 
 # Salvar estatísticas completas
-stats_path = Path(__file__).resolve().parent /".."/ "data" / "dataset30"/ "output30" / "training_statistics_coordinates_only.json"
+stats_path = Path(__file__).resolve().parent /".."/ "data" / dataset_folder/ output_folder / "training_statistics.json" #coordinates_only
 stats.save_all_statistics(stats_path)
 
 """# 6. SAVE MODEL AND PREPROCESSING OBJECTS"""
 # Guardar modelo com informações sobre uso apenas de coordenadas
-model_save_path = Path(__file__).resolve().parent /".." / "data" / "dataset30"/ "output30" / "trained_model_coordinates_only.pth"
+model_save_path = Path(__file__).resolve().parent /".." / "data" / dataset_folder / output_folder / "trained_model.pth" #coordinates_only
 model_save_path.parent.mkdir(parents=True, exist_ok=True)
 
 model_info = {
