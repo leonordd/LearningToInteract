@@ -260,7 +260,7 @@ void processAnimationControl(NetworkData data) {
 
   if (data.validAnguloEsquerda) {
     float angulo = data.anguloMaoEsquerda;
-    boolean gestureDetected = (angulo >= 0 && angulo <= 50);
+    boolean gestureDetected = (angulo >= 0 && angulo <= 90);
 
     // Debounce do gesto
     if (gestureDetected && !gestureActive &&
