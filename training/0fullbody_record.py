@@ -846,7 +846,6 @@ def main():
         print("="*70)
         
         # Caminhos dos ficheiros
-        #folder = "../data/dataset30"
         folder_video_and_csv = "../data/0base"
         video = "video1.mp4"
         csv = "dados_teclas1.csv"
