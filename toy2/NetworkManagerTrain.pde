@@ -1,3 +1,4 @@
+
 // NetworkManager.pde – modo de treino: cliente TCP para receber dados do Python
 // Compatível com servidor Python em 127.0.0.1:60345 a enviar 1 linha por mensagem
 // Linha pode ser: um inteiro (animação) OU JSON com campos (anim, distanciaMaoDireita, distanciaMaoEsquerda, anguloMaoEsquerda, anguloVerticalMaoEsquerda)
