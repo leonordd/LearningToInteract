@@ -605,7 +605,7 @@ def main():
     print("=" * 60)
 
     # Caminhos a alterar em cada teste
-    dataset_folder = "dataset32"
+    dataset_folder = "dataset42"
 
     #Caminhos fixos
     #csv_file = "combinado.csv"  # Ficheiro combinado
