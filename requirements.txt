@@ -1,0 +1,18 @@
+# Visão computacional e processamento de imagem
+opencv-python
+mediapipe
+
+# Machine Learning e Deep Learning
+torch
+numpy
+pandas
+scikit-learn
+matplotlib
+seaborn
+
+# Análise de dados e utilitários
+requests
+joblib
+
+# Nota: As seguintes bibliotecas são built-in do Python (não precisam instalação):
+# socket, json, time, math, threading, pathlib, typing, traceback, csv, os, datetime, collections
