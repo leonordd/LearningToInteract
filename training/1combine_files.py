@@ -6,7 +6,7 @@ from pathlib import Path
 MAX_TIMESTAMP_DIF = 200
 
 # Caminhos a alterar em cada teste
-folder = "../data/dataset42"
+folder = "../data/dataset48"
 ficheiro_b = "v1.csv" #ficheiro menor
 
 #Caminhos fixos
