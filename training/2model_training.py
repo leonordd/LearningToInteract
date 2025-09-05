@@ -30,7 +30,7 @@ import json
 from collections import defaultdict
 
 # Caminhos a alterar em cada teste
-dataset_folder = "dataset42"
+dataset_folder = "dataset48"
 
 #Caminhos fixos
 csv_file = "combinado.csv"  # Ficheiro combinado
@@ -711,7 +711,7 @@ print(f"Tempo médio por época: {np.mean(stats.epoch_times):.2f}s")
 print(f"Tempo total de treino: {sum(stats.epoch_times):.1f}s")
 
 # VISUALIZAÇÕES
-print("\n=== GERANDO VISUALIZAÇÕES ===")
+print("\n=== A GERAR VISUALIZAÇÕES ===")
 
 # Plotar curvas de treino
 stats.plot_training_curves(save_path = Path(__file__).resolve().parent /".."/ "data" / dataset_folder / output_folder / "training_curves.png") #coordinates_only
