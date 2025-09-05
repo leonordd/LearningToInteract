@@ -71,7 +71,7 @@ Este projeto consiste no treino de um modelo de multiclassificação que utiliza
    └── 📁 0base/
    |   └── 📄 dados_teclas1.csv    # Conjunto de dados de saída
    |   └── 📄 video1.mp4           # Vídeo do brinquedo
-   └── 📁 dataset43/
+   └── 📁 dataset48/
        └── 📁 output/              # ficheiros do modelo treinado
        |     └── 🌄 confusion_matrix.png   
        |     └── 🌄 training_curves.png   
